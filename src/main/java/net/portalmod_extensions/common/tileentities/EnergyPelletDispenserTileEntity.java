@@ -83,13 +83,34 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
     }
 
     /**
+     * Called by the pellet when it removes itself for a reason the dispenser did
+     * NOT initiate (age expiry or entity-kill collision).  Clears the tracked
+     * UUID so the dispenser knows no pellet is in flight, then immediately
+     * re-spawns one if the dispenser is still powered.
+     */
+    public void onPelletExpired() {
+        this.pelletUUID = null;
+        setChanged();
+        if(wasPowered) {
+            spawnPelletIfAbsent();
+        }
+    }
+
+    /**
      * Called when the receiver clears itself by means other than a dispenser
-     * power-off (e.g. the receiver block is broken).
+     * power-off (e.g. the receiver block is broken).  Clears the stale receiver
+     * pointer and, if still powered, immediately re-spawns a pellet — the same
+     * behaviour as onPelletExpired for in-flight pellets.
      */
     public void unregisterReceiver() {
         this.receiverPos = null;
         this.receiverDimension = null;
+        // pelletUUID is already null (cleared in registerReceiver when the
+        // receiver caught the pellet), so spawnPelletIfAbsent's guard passes.
         setChanged();
+        if (wasPowered) {
+            spawnPelletIfAbsent();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -143,11 +164,11 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
         ResourceLocation dimLocation = serverLevel.dimension().location();
 
         EnergyPelletEntity pellet = new EnergyPelletEntity(
-                serverLevel,
-                cx + ox, cy + oy, cz + oz,
-                vx, vy, vz,
-                this.getBlockPos(),
-                dimLocation);
+            serverLevel,
+            cx + ox, cy + oy, cz + oz,
+            vx, vy, vz,
+            this.getBlockPos(),
+            dimLocation);
 
         serverLevel.addFreshEntity(pellet);
         pelletUUID = pellet.getUUID();
@@ -243,9 +264,9 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
         }
         if (compound.contains("ReceiverX", Constants.NBT.TAG_INT)) {
             receiverPos = new BlockPos(
-                    compound.getInt("ReceiverX"),
-                    compound.getInt("ReceiverY"),
-                    compound.getInt("ReceiverZ"));
+                compound.getInt("ReceiverX"),
+                compound.getInt("ReceiverY"),
+                compound.getInt("ReceiverZ"));
         } else {
             receiverPos = null;
         }

@@ -37,9 +37,9 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
     public EnergyPelletReceiverBlock(Properties properties) {
         super(properties);
         this.registerDefaultState(this.stateDefinition.any()
-                .setValue(FACING,  Direction.UP)
-                .setValue(CORNER,  QuadBlockCorner.UP_LEFT)
-                .setValue(HOLDING, false));
+            .setValue(FACING,  Direction.UP)
+            .setValue(CORNER,  QuadBlockCorner.UP_LEFT)
+            .setValue(HOLDING, false));
     }
 
     // -------------------------------------------------------------------------
@@ -150,11 +150,21 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
                     // Tell the dispenser it no longer has a receiver, so it
                     // doesn't hold a stale pointer after we're gone.
                     ((net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity) te)
-                            .notifyDispenserOfRemoval();
+                        .notifyDispenserOfRemoval();
                 }
             }
-            // Propagate neighbour updates so antlines and redstone react.
+            // Propagate neighbour updates so redstone reacts.
             updateAllNeighbors(world, pos, state);
+            // If we were holding (antlines lit), also fire updateNeighborsAt for
+            // every block in the 2×2 footprint.  updateAllNeighbors uses
+            // blockUpdated which covers vanilla redstone, but antlines react to
+            // neighborChanged, which is triggered by updateNeighborsAt.
+            // This mirrors how AntlineDecoderBlock deactivates antlines on removal.
+            if (state.getValue(HOLDING)) {
+                for (BlockPos p : getAllPositions(state, pos)) {
+                    world.updateNeighborsAt(p, this);
+                }
+            }
         }
         super.onRemove(state, world, pos, newState, isMoving);
     }
