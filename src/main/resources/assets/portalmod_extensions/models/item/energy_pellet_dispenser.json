@@ -1,0 +1,6 @@
+{
+    "parent": "item/generated",
+    "textures": {
+        "layer0": "portalmod_extensions:item/energy_pellet_dispenser"
+    }
+}

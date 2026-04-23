@@ -1,0 +1,8 @@
+{
+    "variants": {
+        "corner=up_left":    { "model": "portalmod_extensions:block/energy_pellet_dispenser" },
+        "corner=up_right":   { "model": "portalmod_extensions:block/energy_pellet_dispenser" },
+        "corner=down_left":  { "model": "portalmod_extensions:block/energy_pellet_dispenser" },
+        "corner=down_right": { "model": "portalmod_extensions:block/energy_pellet_dispenser" }
+    }
+}
