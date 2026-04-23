@@ -109,14 +109,47 @@ public class EnergyPelletDispenserBlock extends QuadBlock implements AntlineActi
     }
 
     // -------------------------------------------------------------------------
-    // Neighbor / placement hooks — trigger antline re-evaluation
+    // Neighbor / placement hooks — trigger antline re-evaluation AND direct
+    // redstone check on the base blocks
     // -------------------------------------------------------------------------
 
     @Override
     public void neighborChanged(BlockState state, World world, BlockPos pos,
                                 Block block, BlockPos neighborPos, boolean isMoving) {
         if (world.isClientSide) return;
-        this.updateAntlineActivation(state, world, pos);
+
+        // First check antlines (existing logic).
+        // Then also check direct redstone on the base blocks — updateAntlineActivation
+        // only fires for AntlineActivator / AntlineBlock neighbours, so raw redstone
+        // wired to the base never triggered onAntlineActivation.  We mirror the same
+        // hasSignal check that SuperButtonBlock uses for its own base face.
+        if (isDirectlyPoweredByRedstone(state, world, pos)) {
+            onAntlineActivation(true, state, world, pos);
+        } else {
+            // Fall through to antline scan; it will call onAntlineActivation(false)
+            // if nothing active is found.
+            this.updateAntlineActivation(state, world, pos);
+        }
+    }
+
+    /**
+     * Returns true if any of the 2×2 base blocks are receiving a direct
+     * redstone signal from the face the dispenser is mounted on — identical
+     * to how SuperButtonBlock checks its own base.
+     */
+    private boolean isDirectlyPoweredByRedstone(BlockState state, World world, BlockPos pos) {
+        Direction facing = state.getValue(FACING);
+        Direction inward = facing.getOpposite(); // direction pointing into the base
+
+        // Check each block in the multiblock footprint (including this one).
+        for (BlockPos bp : getAllPositions(state, pos)) {
+            if (!(world.getBlockState(bp).getBlock() instanceof EnergyPelletDispenserBlock)) continue;
+            // The base block is one step in the inward direction from each corner.
+            if (world.hasSignal(bp.relative(inward), facing)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -128,17 +161,21 @@ public class EnergyPelletDispenserBlock extends QuadBlock implements AntlineActi
     }
 
     // -------------------------------------------------------------------------
-    // Destruction — kill the pellet when the block is broken
+    // Destruction — kill the pellet when the block is broken.
+    // Only run cleanup once, from the main (UP_LEFT) corner, to avoid the
+    // 4× repeated large-radius scan that caused the delayed-removal lag.
     // -------------------------------------------------------------------------
 
     @Override
     public void onRemove(BlockState state, World world, BlockPos pos,
                          BlockState newState, boolean isMoving) {
         if (!world.isClientSide && !state.is(newState.getBlock())) {
-            BlockPos mainPos = getMainPosition(state, pos);
-            TileEntity te = world.getBlockEntity(mainPos);
-            if (te instanceof EnergyPelletDispenserTileEntity) {
-                ((EnergyPelletDispenserTileEntity) te).killPelletAndClearReceivers();
+            // Only the main corner owns the tile entity — skip the other three.
+            if (state.getValue(CORNER) == net.portalmod.common.sorted.button.QuadBlockCorner.UP_LEFT) {
+                TileEntity te = world.getBlockEntity(pos);
+                if (te instanceof EnergyPelletDispenserTileEntity) {
+                    ((EnergyPelletDispenserTileEntity) te).killPelletAndClearReceivers();
+                }
             }
         }
         super.onRemove(state, world, pos, newState, isMoving);

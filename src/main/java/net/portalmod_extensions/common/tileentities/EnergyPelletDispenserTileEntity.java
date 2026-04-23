@@ -63,6 +63,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
      * power state.  Detects rising and falling edges.
      */
     public void onPowerChanged(boolean nowPowered) {
+        net.portalmod_extensions.PortalModExtensions.LOGGER.info("onPowerChanged: " + nowPowered);
         if (nowPowered && !wasPowered) {
             // Rising edge: spawn pellet if none exists.
             spawnPelletIfAbsent();
@@ -78,6 +79,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
     // -------------------------------------------------------------------------
 
     private void spawnPelletIfAbsent() {
+        net.portalmod_extensions.PortalModExtensions.LOGGER.info("spawnPelletIfAbsent: ");
         if (this.level == null || this.level.isClientSide) return;
         if (!(this.level instanceof ServerWorld)) return;
 
@@ -135,6 +137,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
      * Called on falling redstone edge or block destruction.
      */
     public void killPelletAndClearReceivers() {
+        net.portalmod_extensions.PortalModExtensions.LOGGER.info("killPelletAndClearReceivers: ");
         if (this.level == null || this.level.isClientSide) return;
         if (!(this.level instanceof ServerWorld)) return;
 
@@ -155,7 +158,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
         // We search in a reasonable radius around the dispenser.
         // A full level scan would be too expensive; 256 blocks is generous for puzzle rooms.
         BlockPos center = this.getBlockPos();
-        int searchRadius = 256;
+        int searchRadius = 64;
 
         for (BlockPos p : BlockPos.betweenClosed(
                 center.offset(-searchRadius, -searchRadius, -searchRadius),
@@ -186,6 +189,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
     @Override
     public CompoundNBT save(CompoundNBT compound) {
         super.save(compound);
+        net.portalmod_extensions.PortalModExtensions.LOGGER.info("save: " + compound);
         compound.putBoolean("WasPowered", wasPowered);
         if (pelletUUID != null) {
             compound.putUUID("PelletUUID", pelletUUID);
@@ -195,6 +199,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
 
     @Override
     public void load(BlockState state, CompoundNBT compound) {
+        net.portalmod_extensions.PortalModExtensions.LOGGER.info("load: " + state + compound);
         super.load(state, compound);
         wasPowered = compound.getBoolean("WasPowered");
         if (compound.hasUUID("PelletUUID")) {
