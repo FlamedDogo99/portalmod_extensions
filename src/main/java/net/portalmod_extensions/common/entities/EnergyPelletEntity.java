@@ -16,12 +16,9 @@ import net.minecraft.util.math.BlockRayTraceResult;
 import net.minecraft.util.math.EntityRayTraceResult;
 import net.minecraft.util.math.RayTraceResult;
 import net.minecraft.util.math.vector.Vector3d;
-import net.minecraft.util.registry.Registry;
 import net.minecraft.world.World;
-import net.minecraft.world.server.ServerWorld;
 import net.minecraftforge.fml.network.NetworkHooks;
 import net.portalmod_extensions.PortalModExtensions;
-import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEntity;
 import net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity;
 
 import javax.annotation.Nullable;
@@ -29,18 +26,24 @@ import javax.annotation.Nullable;
 /**
  * Energy Pellet entity.
  * <p>
- * Extends FireballEntity so it travels in a straight line via xPower/yPower/zPower.
- * On block collision it performs a 100% elastic (perfect mirror) reflection along
- * the axis of the face that was hit.
- * On entity collision it kills non-portalmod entities; portalmod entities have a
- * blank handler left for future implementation.
+ * Extends FireballEntity (DamagingProjectileEntity) but neutralizes the two
+ * behaviors that caused continuous speed increase:
  * <p>
- * Has an age that counts DOWN from INITIAL_AGE each tick. The entity is removed
- * when the age reaches zero.
+ * 1. xPower/yPower/zPower accumulation — DamagingProjectileEntity.tick() adds
+ * these to deltaMovement every tick, continuously accelerating the entity.
+ * We use the type-only constructor (which leaves them at zero) and never set
+ * them, so the add is always +0 and has no effect.
  * <p>
- * Carries the BlockPos and dimension key of the dispenser that spawned it, so that
- * when a receiver catches the pellet it can notify the dispenser directly — no
- * world-wide search needed.
+ * 2. Inertia scaling — tick() multiplies deltaMovement by getInertia() (0.95F
+ * by default) every tick, creating drag.  We override getInertia() to return
+ * 1.0F so deltaMovement is never damped.
+ * <p>
+ * With both neutralized, deltaMovement is the sole source of truth for velocity.
+ * It is set once at spawn and only ever changed by the elastic reflection in
+ * onHitBlock, giving true constant-velocity travel between bounces.
+ * <p>
+ * Carries the BlockPos and dimension key of the spawning dispenser so that when
+ * a receiver catches it, the receiver can notify the dispenser in O(1).
  */
 public class EnergyPelletEntity extends FireballEntity {
 
@@ -49,9 +52,6 @@ public class EnergyPelletEntity extends FireballEntity {
      */
     public static final int INITIAL_AGE = 200;
 
-    /**
-     * Namespace prefix used to identify portalmod entities.
-     */
     private static final String PORTALMOD_NAMESPACE = "portalmod";
 
     // -------------------------------------------------------------------------
@@ -61,29 +61,11 @@ public class EnergyPelletEntity extends FireballEntity {
     private static final DataParameter<Integer> DATA_AGE = EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
 
     // -------------------------------------------------------------------------
-    // Association with spawning dispenser (position + dimension, not UUID)
-    //
-    // A BlockPos + dimension key is used instead of a UUID because:
-    //   - TileEntities have no persistent UUID; the previous code derived one
-    //     deterministically from the position anyway, making the UUID redundant.
-    //   - A direct getBlockEntity(pos) lookup is O(1) and never needs a search.
-    //   - The dimension key guards against the (currently impossible but
-    //     theoretically possible) case where a dispenser and a receiver exist in
-    //     different dimensions.
-    //
-    // Note: pellets are FireballEntities with no teleportation logic, so they
-    // always stay in the dimension they were spawned in.  The dimension field on
-    // the pellet will therefore equal the dispenser's dimension in all normal
-    // usage, but it is stored explicitly for correctness.
+    // Dispenser association
     // -------------------------------------------------------------------------
 
     @Nullable
     private BlockPos dispenserPos = null;
-
-    /**
-     * Registry key location string for the dimension the dispenser is in
-     * (e.g. "minecraft:overworld").  Stored as a string for NBT simplicity.
-     */
     @Nullable
     private String dispenserDimension = null;
 
@@ -92,18 +74,28 @@ public class EnergyPelletEntity extends FireballEntity {
     // -------------------------------------------------------------------------
 
     /**
-     * Required by EntityType factory (world-only constructor).
+     * Required by EntityType factory.
      */
     public EnergyPelletEntity(EntityType<? extends EnergyPelletEntity> type, World world) {
         super(type, world);
+        // xPower/yPower/zPower are already zero — leave them that way.
     }
 
     /**
-     * Convenience constructor used by EnergyPelletDispenserTileEntity when
-     * spawning a new pellet.
+     * Spawn constructor called by EnergyPelletDispenserTileEntity.
+     * <p>
+     * Uses the type-only super constructor so that DamagingProjectileEntity's
+     * position+velocity constructor cannot normalise and rescale our velocity
+     * vector into xPower.  Position and deltaMovement are set manually below.
      */
     public EnergyPelletEntity(World world, double x, double y, double z, double velX, double velY, double velZ, @Nullable BlockPos dispenserPos, @Nullable ResourceLocation dispenserDimension) {
-        super(world, x, y, z, velX, velY, velZ);
+        super(net.portalmod_extensions.core.init.EntityInit.ENERGY_PELLET.get(), world);
+        // Place the entity. reapplyPosition() syncs the bounding box.
+        this.moveTo(x, y, z, this.yRot, this.xRot);
+        this.reapplyPosition();
+        // Store velocity purely in deltaMovement. xPower/yPower/zPower remain
+        // zero, so DamagingProjectileEntity.tick()'s "+= power" adds nothing.
+        this.setDeltaMovement(velX, velY, velZ);
         this.dispenserPos = dispenserPos;
         this.dispenserDimension = dispenserDimension != null ? dispenserDimension.toString() : null;
         this.entityData.set(DATA_AGE, INITIAL_AGE);
@@ -120,12 +112,22 @@ public class EnergyPelletEntity extends FireballEntity {
     }
 
     // -------------------------------------------------------------------------
+    // Inertia — disable drag so deltaMovement is never damped between ticks
+    // -------------------------------------------------------------------------
+
+    @Override
+    protected float getInertia() {
+        return 1.0F;
+    }
+
+    // -------------------------------------------------------------------------
     // Tick / lifetime
     // -------------------------------------------------------------------------
 
     @Override
     public void tick() {
-        super.tick();
+        super.tick(); // runs DamagingProjectileEntity.tick(): adds xPower (0),
+        // scales by getInertia() (1.0), moves, detects hits
 
         if(!this.level.isClientSide) {
             int age = this.entityData.get(DATA_AGE) - 1;
@@ -142,25 +144,15 @@ public class EnergyPelletEntity extends FireballEntity {
 
     @Override
     protected void onHitBlock(BlockRayTraceResult result) {
-        // Do NOT call super — super ignites the block, which we do not want.
+        // Do NOT call super — FireballEntity.onHitBlock causes an explosion.
 
         if(this.level.isClientSide) {
             return;
         }
 
-        // Reflect the power vector along the axis of the face that was hit.
-        switch(result.getDirection().getAxis()) {
-            case X:
-                this.xPower = -this.xPower;
-                break;
-            case Y:
-                this.yPower = -this.yPower;
-                break;
-            case Z:
-                this.zPower = -this.zPower;
-                break;
-        }
-
+        // 100% elastic reflection: negate only the component on the hit axis.
+        // deltaMovement is the sole velocity store; xPower/yPower/zPower are
+        // all zero and do not need updating.
         Vector3d vel = this.getDeltaMovement();
         switch(result.getDirection().getAxis()) {
             case X:
@@ -174,7 +166,7 @@ public class EnergyPelletEntity extends FireballEntity {
                 break;
         }
 
-        // Check if this is a receiver block and hand off to it.
+        // Check for receiver.
         TileEntity te = this.level.getBlockEntity(result.getBlockPos());
         if(te instanceof EnergyPelletReceiverTileEntity) {
             EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) te;
@@ -196,9 +188,9 @@ public class EnergyPelletEntity extends FireballEntity {
         }
 
         Entity target = result.getEntity();
-        String registryNamespace = target.getType().getRegistryName() != null ? target.getType().getRegistryName().getNamespace() : "";
+        String namespace = target.getType().getRegistryName() != null ? target.getType().getRegistryName().getNamespace() : "";
 
-        if(registryNamespace.equals(PORTALMOD_NAMESPACE) || registryNamespace.equals(PortalModExtensions.MODID)) {
+        if(namespace.equals(PORTALMOD_NAMESPACE) || namespace.equals(PortalModExtensions.MODID)) {
             handlePortalModEntityCollision(target);
         } else {
             if(target instanceof LivingEntity) {
@@ -216,7 +208,7 @@ public class EnergyPelletEntity extends FireballEntity {
     }
 
     // -------------------------------------------------------------------------
-    // FireballEntity overrides — prevent fire / explosion
+    // FireballEntity/DamagingProjectileEntity overrides — prevent fire/explosion
     // -------------------------------------------------------------------------
 
     @Override
@@ -226,11 +218,16 @@ public class EnergyPelletEntity extends FireballEntity {
         } else if(result.getType() == RayTraceResult.Type.ENTITY) {
             onHitEntity((EntityRayTraceResult) result);
         }
-        // Do NOT call super.onHit — it would trigger ignition logic.
+        // Do NOT call super — it would trigger FireballEntity's ignition logic.
+    }
+
+    @Override
+    protected boolean shouldBurn() {
+        return false;
     }
 
     // -------------------------------------------------------------------------
-    // NBT serialisation
+    // NBT
     // -------------------------------------------------------------------------
 
     @Override
