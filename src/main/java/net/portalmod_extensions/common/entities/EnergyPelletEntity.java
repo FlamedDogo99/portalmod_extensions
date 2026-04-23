@@ -10,17 +10,21 @@ import net.minecraft.network.datasync.DataParameter;
 import net.minecraft.network.datasync.DataSerializers;
 import net.minecraft.network.datasync.EntityDataManager;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.ResourceLocation;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.BlockRayTraceResult;
 import net.minecraft.util.math.EntityRayTraceResult;
 import net.minecraft.util.math.RayTraceResult;
 import net.minecraft.util.math.vector.Vector3d;
+import net.minecraft.util.registry.Registry;
 import net.minecraft.world.World;
+import net.minecraft.world.server.ServerWorld;
 import net.minecraftforge.fml.network.NetworkHooks;
 import net.portalmod_extensions.PortalModExtensions;
+import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEntity;
 import net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity;
 
 import javax.annotation.Nullable;
-import java.util.UUID;
 
 /**
  * Energy Pellet entity.
@@ -32,9 +36,11 @@ import java.util.UUID;
  * blank handler left for future implementation.
  *
  * Has an age that counts DOWN from INITIAL_AGE each tick. The entity is removed
- * when the age reaches zero (mirrors FallingBlockEntity behaviour where the NBT
- * tag "Time" counts up and the entity dies after a threshold, but here we count
- * down for simplicity).
+ * when the age reaches zero.
+ *
+ * Carries the BlockPos and dimension key of the dispenser that spawned it, so that
+ * when a receiver catches the pellet it can notify the dispenser directly — no
+ * world-wide search needed.
  */
 public class EnergyPelletEntity extends FireballEntity {
 
@@ -52,13 +58,31 @@ public class EnergyPelletEntity extends FireballEntity {
             EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
 
     // -------------------------------------------------------------------------
-    // Association with spawning dispenser
+    // Association with spawning dispenser (position + dimension, not UUID)
+    //
+    // A BlockPos + dimension key is used instead of a UUID because:
+    //   - TileEntities have no persistent UUID; the previous code derived one
+    //     deterministically from the position anyway, making the UUID redundant.
+    //   - A direct getBlockEntity(pos) lookup is O(1) and never needs a search.
+    //   - The dimension key guards against the (currently impossible but
+    //     theoretically possible) case where a dispenser and a receiver exist in
+    //     different dimensions.
+    //
+    // Note: pellets are FireballEntities with no teleportation logic, so they
+    // always stay in the dimension they were spawned in.  The dimension field on
+    // the pellet will therefore equal the dispenser's dimension in all normal
+    // usage, but it is stored explicitly for correctness.
     // -------------------------------------------------------------------------
 
-    /** UUID of the EnergyPelletDispenserTileEntity that spawned this pellet.
-     *  May be null if not yet set or loaded from NBT. */
     @Nullable
-    private UUID dispenserUUID;
+    private BlockPos dispenserPos = null;
+
+    /**
+     * Registry key location string for the dimension the dispenser is in
+     * (e.g. "minecraft:overworld").  Stored as a string for NBT simplicity.
+     */
+    @Nullable
+    private String dispenserDimension = null;
 
     // -------------------------------------------------------------------------
     // Constructors
@@ -72,25 +96,15 @@ public class EnergyPelletEntity extends FireballEntity {
     /**
      * Convenience constructor used by EnergyPelletDispenserTileEntity when
      * spawning a new pellet.
-     *
-     * @param world         the server world
-     * @param x             spawn X (centre of 2×2 dispenser face)
-     * @param y             spawn Y
-     * @param z             spawn Z
-     * @param velX          initial velocity X component
-     * @param velY          initial velocity Y component
-     * @param velZ          initial velocity Z component
-     * @param dispenserUUID UUID of the tile entity that spawned this pellet
      */
     public EnergyPelletEntity(World world,
                               double x, double y, double z,
                               double velX, double velY, double velZ,
-                              @Nullable UUID dispenserUUID) {
-        // FireballEntity(World, x, y, z, accelX, accelY, accelZ) sets position and
-        // xPower/yPower/zPower directly — this is the correct constructor to use.
+                              @Nullable BlockPos dispenserPos,
+                              @Nullable ResourceLocation dispenserDimension) {
         super(world, x, y, z, velX, velY, velZ);
-        this.dispenserUUID = dispenserUUID;
-        // Initialise age (defineSynchedData has already run via super chain)
+        this.dispenserPos = dispenserPos;
+        this.dispenserDimension = dispenserDimension != null ? dispenserDimension.toString() : null;
         this.entityData.set(DATA_AGE, INITIAL_AGE);
     }
 
@@ -125,13 +139,6 @@ public class EnergyPelletEntity extends FireballEntity {
     // Collision — block
     // -------------------------------------------------------------------------
 
-    /**
-     * Called by FireballEntity when a block face is hit.
-     *
-     * We perform a 100% elastic reflection: the velocity component along the
-     * axis of the hit face is negated (mirrored), while the other two components
-     * are kept unchanged.
-     */
     @Override
     protected void onHitBlock(BlockRayTraceResult result) {
         // Do NOT call super — super ignites the block, which we do not want.
@@ -140,30 +147,16 @@ public class EnergyPelletEntity extends FireballEntity {
 
         // Reflect the power vector along the axis of the face that was hit.
         switch (result.getDirection().getAxis()) {
-            case X:
-                this.xPower = -this.xPower;
-                break;
-            case Y:
-                this.yPower = -this.yPower;
-                break;
-            case Z:
-                this.zPower = -this.zPower;
-                break;
+            case X: this.xPower = -this.xPower; break;
+            case Y: this.yPower = -this.yPower; break;
+            case Z: this.zPower = -this.zPower; break;
         }
 
-        // Also correct the current delta movement to match, so the entity does not
-        // stutter on the frame of the bounce.
         Vector3d vel = this.getDeltaMovement();
         switch (result.getDirection().getAxis()) {
-            case X:
-                this.setDeltaMovement(-vel.x, vel.y, vel.z);
-                break;
-            case Y:
-                this.setDeltaMovement(vel.x, -vel.y, vel.z);
-                break;
-            case Z:
-                this.setDeltaMovement(vel.x, vel.y, -vel.z);
-                break;
+            case X: this.setDeltaMovement(-vel.x, vel.y, vel.z); break;
+            case Y: this.setDeltaMovement(vel.x, -vel.y, vel.z); break;
+            case Z: this.setDeltaMovement(vel.x, vel.y, -vel.z); break;
         }
 
         // Check if this is a receiver block and hand off to it.
@@ -171,11 +164,9 @@ public class EnergyPelletEntity extends FireballEntity {
         if (te instanceof EnergyPelletReceiverTileEntity) {
             EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) te;
             if (!receiver.isHolding()) {
-                receiver.catchPellet(this.dispenserUUID);
+                receiver.catchPellet(dispenserPos, dispenserDimension);
                 this.remove();
             }
-            // If the receiver is already holding, the pellet just bounces off normally
-            // (the reflection above already applied).
         }
     }
 
@@ -194,12 +185,9 @@ public class EnergyPelletEntity extends FireballEntity {
 
         if (registryNamespace.equals(PORTALMOD_NAMESPACE)
                 || registryNamespace.equals(PortalModExtensions.MODID)) {
-            // Blank handler — behaviour for portalmod entities to be implemented later.
             handlePortalModEntityCollision(target);
         } else {
-            // Kill non-portalmod entities.
             if (target instanceof LivingEntity) {
-                // Use a large damage value to guarantee death regardless of armour.
                 target.hurt(net.minecraft.util.DamageSource.MAGIC, Float.MAX_VALUE);
             } else {
                 target.remove();
@@ -208,10 +196,6 @@ public class EnergyPelletEntity extends FireballEntity {
         }
     }
 
-    /**
-     * Blank handler for collisions with portalmod-namespace entities.
-     * To be implemented in a future update.
-     */
     @SuppressWarnings("unused")
     private void handlePortalModEntityCollision(Entity target) {
         // TODO: implement portalmod entity collision behaviour
@@ -239,8 +223,13 @@ public class EnergyPelletEntity extends FireballEntity {
     public void addAdditionalSaveData(CompoundNBT compound) {
         super.addAdditionalSaveData(compound);
         compound.putInt("Age", this.entityData.get(DATA_AGE));
-        if (this.dispenserUUID != null) {
-            compound.putUUID("DispenserUUID", this.dispenserUUID);
+        if (dispenserPos != null) {
+            compound.putInt("DispenserX", dispenserPos.getX());
+            compound.putInt("DispenserY", dispenserPos.getY());
+            compound.putInt("DispenserZ", dispenserPos.getZ());
+        }
+        if (dispenserDimension != null) {
+            compound.putString("DispenserDim", dispenserDimension);
         }
     }
 
@@ -250,8 +239,14 @@ public class EnergyPelletEntity extends FireballEntity {
         if (compound.contains("Age")) {
             this.entityData.set(DATA_AGE, compound.getInt("Age"));
         }
-        if (compound.hasUUID("DispenserUUID")) {
-            this.dispenserUUID = compound.getUUID("DispenserUUID");
+        if (compound.contains("DispenserX")) {
+            this.dispenserPos = new BlockPos(
+                    compound.getInt("DispenserX"),
+                    compound.getInt("DispenserY"),
+                    compound.getInt("DispenserZ"));
+        }
+        if (compound.contains("DispenserDim")) {
+            this.dispenserDimension = compound.getString("DispenserDim");
         }
     }
 
@@ -260,12 +255,13 @@ public class EnergyPelletEntity extends FireballEntity {
     // -------------------------------------------------------------------------
 
     @Nullable
-    public UUID getDispenserUUID() {
-        return dispenserUUID;
+    public BlockPos getDispenserPos() {
+        return dispenserPos;
     }
 
-    public void setDispenserUUID(@Nullable UUID dispenserUUID) {
-        this.dispenserUUID = dispenserUUID;
+    @Nullable
+    public String getDispenserDimension() {
+        return dispenserDimension;
     }
 
     public int getAge() {

@@ -143,6 +143,16 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
     public void onRemove(BlockState state, World world, BlockPos pos,
                          BlockState newState, boolean isMoving) {
         if (!world.isClientSide && !state.is(newState.getBlock())) {
+            // Only the main corner owns the tile entity.
+            if (state.getValue(CORNER) == net.portalmod.common.sorted.button.QuadBlockCorner.UP_LEFT) {
+                net.minecraft.tileentity.TileEntity te = world.getBlockEntity(pos);
+                if (te instanceof net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity) {
+                    // Tell the dispenser it no longer has a receiver, so it
+                    // doesn't hold a stale pointer after we're gone.
+                    ((net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity) te)
+                            .notifyDispenserOfRemoval();
+                }
+            }
             // Propagate neighbour updates so antlines and redstone react.
             updateAllNeighbors(world, pos, state);
         }

@@ -1,15 +1,18 @@
 package net.portalmod_extensions.common.tileentities;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.entity.Entity;
 import net.minecraft.nbt.CompoundNBT;
 import net.minecraft.tileentity.TileEntity;
-import net.minecraft.util.Direction;
+import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.server.ServerWorld;
+import net.minecraftforge.common.util.Constants;
 import net.portalmod_extensions.common.blocks.EnergyPelletDispenserBlock;
 import net.portalmod_extensions.common.entities.EnergyPelletEntity;
 import net.portalmod_extensions.core.init.TileEntityTypeInit;
 
+import javax.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
 
@@ -19,19 +22,40 @@ import java.util.UUID;
  * Stored only on the main (UP_LEFT) corner block.
  * Tracks:
  *   - whether the block is currently powered
- *   - the UUID of the EnergyPelletEntity it has spawned (null if none)
+ *   - the UUID of the live pellet (for killing it — World.getEntity(UUID) is O(1))
+ *   - the BlockPos + dimension of the receiver currently holding the pellet
+ *     (registered by the receiver when it catches the pellet; cleared when power
+ *     is lost — getBlockEntity(pos) is O(1), no search needed)
  *
  * Redstone logic:
  *   - Rising edge  (unpowered → powered):  spawn a pellet if none exists.
- *   - Falling edge (powered → unpowered):  kill the pellet and clear any receiver.
+ *   - Falling edge (powered → unpowered):  kill the pellet and clear the receiver.
  */
 public class EnergyPelletDispenserTileEntity extends TileEntity {
 
-    /** UUID of the currently live pellet spawned by this dispenser.  Null when none. */
-    private UUID pelletUUID = null;
-
     /** Whether the dispenser was powered during the last redstone check. */
     private boolean wasPowered = false;
+
+    /**
+     * UUID of the currently live pellet.  Used only for killing it via the O(1)
+     * World.getEntity(UUID) lookup.  Null when no pellet is in flight.
+     */
+    @Nullable
+    private UUID pelletUUID = null;
+
+    /**
+     * BlockPos of the receiver currently holding this dispenser's pellet.
+     * Null until a receiver catches the pellet (which calls registerReceiver).
+     */
+    @Nullable
+    private BlockPos receiverPos = null;
+
+    /**
+     * Dimension key string of the receiver's world (e.g. "minecraft:overworld").
+     * Null when receiverPos is null.
+     */
+    @Nullable
+    private String receiverDimension = null;
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -42,33 +66,41 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
     }
 
     // -------------------------------------------------------------------------
-    // Unique identifier (tile entities share a UUID with their BlockPos in NBT;
-    // we give the dispenser its own UUID so pellets and receivers can reference it).
+    // Receiver registration — called by EnergyPelletReceiverTileEntity
     // -------------------------------------------------------------------------
 
-    /** Stable UUID derived from this tile entity's block position. */
-    public UUID getDispenserUUID() {
-        // A stable, deterministic UUID based on the position string.
-        BlockPos pos = this.getBlockPos();
-        String key = "dispenser_" + pos.getX() + "_" + pos.getY() + "_" + pos.getZ();
-        return UUID.nameUUIDFromBytes(key.getBytes());
+    /**
+     * Called when a receiver catches this dispenser's pellet.
+     * Records the receiver's location so killPelletAndClearReceivers can reach
+     * it in O(1) without any search.
+     */
+    public void registerReceiver(BlockPos pos, String dimension) {
+        this.receiverPos = pos;
+        this.receiverDimension = dimension;
+        // The pellet has been caught; it will remove itself, so clear our UUID.
+        this.pelletUUID = null;
+        setChanged();
+    }
+
+    /**
+     * Called when the receiver clears itself by means other than a dispenser
+     * power-off (e.g. the receiver block is broken).
+     */
+    public void unregisterReceiver() {
+        this.receiverPos = null;
+        this.receiverDimension = null;
+        setChanged();
     }
 
     // -------------------------------------------------------------------------
     // Redstone edge-detection
     // -------------------------------------------------------------------------
 
-    /**
-     * Called from EnergyPelletDispenserBlock#neighborChanged with the current
-     * power state.  Detects rising and falling edges.
-     */
     public void onPowerChanged(boolean nowPowered) {
         net.portalmod_extensions.PortalModExtensions.LOGGER.info("onPowerChanged: " + nowPowered);
         if (nowPowered && !wasPowered) {
-            // Rising edge: spawn pellet if none exists.
             spawnPelletIfAbsent();
         } else if (!nowPowered && wasPowered) {
-            // Falling edge: kill pellet and clear receivers.
             killPelletAndClearReceivers();
         }
         wasPowered = nowPowered;
@@ -83,44 +115,39 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
         if (this.level == null || this.level.isClientSide) return;
         if (!(this.level instanceof ServerWorld)) return;
 
-        ServerWorld serverLevel = (ServerWorld) this.level;
+        // Already active — pellet is in flight or caught by a receiver.
+        if (pelletUUID != null || receiverPos != null) return;
 
-        // If a pellet with our UUID is already alive, do nothing.
-        if (pelletUUID != null && serverLevel.getEntity(pelletUUID) instanceof EnergyPelletEntity) {
-            return;
-        }
+        ServerWorld serverLevel = (ServerWorld) this.level;
 
         BlockState state = this.getBlockState();
         if (!(state.getBlock() instanceof EnergyPelletDispenserBlock)) return;
 
-        Direction facing = state.getValue(EnergyPelletDispenserBlock.FACING);
-
-        // Spawn the pellet centred above (in the facing direction) the 2×2 footprint.
-        // The dispenser's main corner is UP_LEFT.  We need the centre of the 2×2 face.
         EnergyPelletDispenserBlock block = (EnergyPelletDispenserBlock) state.getBlock();
+        net.minecraft.util.Direction facing = state.getValue(EnergyPelletDispenserBlock.FACING);
         List<BlockPos> allPositions = block.getAllPositions(state, this.getBlockPos());
 
-        // Average position of the four blocks gives us the centre of the 2×2.
         double cx = allPositions.stream().mapToDouble(p -> p.getX() + 0.5).average().orElse(this.getBlockPos().getX() + 0.5);
         double cy = allPositions.stream().mapToDouble(p -> p.getY() + 0.5).average().orElse(this.getBlockPos().getY() + 0.5);
         double cz = allPositions.stream().mapToDouble(p -> p.getZ() + 0.5).average().orElse(this.getBlockPos().getZ() + 0.5);
 
-        // Offset by 0.5 in the facing direction so the pellet spawns just outside the face.
         double ox = facing.getStepX() * 0.5;
         double oy = facing.getStepY() * 0.5;
         double oz = facing.getStepZ() * 0.5;
 
-        // Velocity: 1 block/tick in the facing direction (a reasonable pellet speed).
         double speed = 0.5;
         double vx = facing.getStepX() * speed;
         double vy = facing.getStepY() * speed;
         double vz = facing.getStepZ() * speed;
 
+        ResourceLocation dimLocation = serverLevel.dimension().location();
+
         EnergyPelletEntity pellet = new EnergyPelletEntity(
                 serverLevel,
                 cx + ox, cy + oy, cz + oz,
                 vx, vy, vz,
-                getDispenserUUID());
+                this.getBlockPos(),
+                dimLocation);
 
         serverLevel.addFreshEntity(pellet);
         pelletUUID = pellet.getUUID();
@@ -128,12 +155,13 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
     }
 
     // -------------------------------------------------------------------------
-    // Pellet / receiver cleanup
+    // Cleanup
     // -------------------------------------------------------------------------
 
     /**
-     * Kills the associated pellet (if still alive) and clears any receiver
-     * that is holding a pellet associated with this dispenser.
+     * Kills the live pellet (O(1) UUID lookup) and clears the registered
+     * receiver (O(1) BlockPos lookup).  No world search of any kind.
+     *
      * Called on falling redstone edge or block destruction.
      */
     public void killPelletAndClearReceivers() {
@@ -142,44 +170,44 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
         if (!(this.level instanceof ServerWorld)) return;
 
         ServerWorld serverLevel = (ServerWorld) this.level;
-        UUID myUUID = getDispenserUUID();
 
-        // Kill the pellet.
+        // Kill the pellet — World.getEntity(UUID) is a hash-map lookup, O(1).
         if (pelletUUID != null) {
-            net.minecraft.entity.Entity entity = serverLevel.getEntity(pelletUUID);
-            if (entity instanceof EnergyPelletEntity) {
+            Entity entity = serverLevel.getEntity(pelletUUID);
+            if (entity != null) {
                 entity.remove();
             }
             pelletUUID = null;
             setChanged();
         }
 
-        // Clear any receiver that is holding a pellet from this dispenser.
-        // We search in a reasonable radius around the dispenser.
-        // A full level scan would be too expensive; 256 blocks is generous for puzzle rooms.
-        BlockPos center = this.getBlockPos();
-        int searchRadius = 64;
-
-        for (BlockPos p : BlockPos.betweenClosed(
-                center.offset(-searchRadius, -searchRadius, -searchRadius),
-                center.offset( searchRadius,  searchRadius,  searchRadius))) {
-
-            TileEntity te = serverLevel.getBlockEntity(p);
-            if (te instanceof EnergyPelletReceiverTileEntity) {
-                EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) te;
-                if (myUUID.equals(receiver.getHeldDispenserUUID())) {
-                    receiver.clearHeldPellet();
+        // Clear the receiver — getBlockEntity(pos) is also O(1).
+        if (receiverPos != null && receiverDimension != null) {
+            ServerWorld receiverWorld = findWorld(serverLevel, receiverDimension);
+            if (receiverWorld != null) {
+                TileEntity te = receiverWorld.getBlockEntity(receiverPos);
+                if (te instanceof EnergyPelletReceiverTileEntity) {
+                    ((EnergyPelletReceiverTileEntity) te).clearHeldPellet();
                 }
             }
+            receiverPos = null;
+            receiverDimension = null;
+            setChanged();
         }
     }
 
     // -------------------------------------------------------------------------
-    // Accessor
+    // Utility
     // -------------------------------------------------------------------------
 
-    public UUID getPelletUUID() {
-        return pelletUUID;
+    @Nullable
+    private static ServerWorld findWorld(ServerWorld anyWorld, String dimensionKey) {
+        for (ServerWorld w : anyWorld.getServer().getAllLevels()) {
+            if (w.dimension().location().toString().equals(dimensionKey)) {
+                return w;
+            }
+        }
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -189,21 +217,42 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
     @Override
     public CompoundNBT save(CompoundNBT compound) {
         super.save(compound);
-        net.portalmod_extensions.PortalModExtensions.LOGGER.info("save: " + compound);
         compound.putBoolean("WasPowered", wasPowered);
         if (pelletUUID != null) {
             compound.putUUID("PelletUUID", pelletUUID);
+        }
+        if (receiverPos != null) {
+            compound.putInt("ReceiverX", receiverPos.getX());
+            compound.putInt("ReceiverY", receiverPos.getY());
+            compound.putInt("ReceiverZ", receiverPos.getZ());
+        }
+        if (receiverDimension != null) {
+            compound.putString("ReceiverDim", receiverDimension);
         }
         return compound;
     }
 
     @Override
     public void load(BlockState state, CompoundNBT compound) {
-        net.portalmod_extensions.PortalModExtensions.LOGGER.info("load: " + state + compound);
         super.load(state, compound);
         wasPowered = compound.getBoolean("WasPowered");
         if (compound.hasUUID("PelletUUID")) {
             pelletUUID = compound.getUUID("PelletUUID");
+        } else {
+            pelletUUID = null;
+        }
+        if (compound.contains("ReceiverX", Constants.NBT.TAG_INT)) {
+            receiverPos = new BlockPos(
+                    compound.getInt("ReceiverX"),
+                    compound.getInt("ReceiverY"),
+                    compound.getInt("ReceiverZ"));
+        } else {
+            receiverPos = null;
+        }
+        if (compound.contains("ReceiverDim", Constants.NBT.TAG_STRING)) {
+            receiverDimension = compound.getString("ReceiverDim");
+        } else {
+            receiverDimension = null;
         }
     }
 }
