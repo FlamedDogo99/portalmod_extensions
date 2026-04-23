@@ -28,34 +28,37 @@ import javax.annotation.Nullable;
 
 /**
  * Energy Pellet entity.
- *
+ * <p>
  * Extends FireballEntity so it travels in a straight line via xPower/yPower/zPower.
  * On block collision it performs a 100% elastic (perfect mirror) reflection along
  * the axis of the face that was hit.
  * On entity collision it kills non-portalmod entities; portalmod entities have a
  * blank handler left for future implementation.
- *
+ * <p>
  * Has an age that counts DOWN from INITIAL_AGE each tick. The entity is removed
  * when the age reaches zero.
- *
+ * <p>
  * Carries the BlockPos and dimension key of the dispenser that spawned it, so that
  * when a receiver catches the pellet it can notify the dispenser directly — no
  * world-wide search needed.
  */
 public class EnergyPelletEntity extends FireballEntity {
 
-    /** Maximum lifetime in ticks (10 seconds at 20 TPS). */
+    /**
+     * Maximum lifetime in ticks (10 seconds at 20 TPS).
+     */
     public static final int INITIAL_AGE = 200;
 
-    /** Namespace prefix used to identify portalmod entities. */
+    /**
+     * Namespace prefix used to identify portalmod entities.
+     */
     private static final String PORTALMOD_NAMESPACE = "portalmod";
 
     // -------------------------------------------------------------------------
     // Tracked data
     // -------------------------------------------------------------------------
 
-    private static final DataParameter<Integer> DATA_AGE =
-            EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
+    private static final DataParameter<Integer> DATA_AGE = EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
 
     // -------------------------------------------------------------------------
     // Association with spawning dispenser (position + dimension, not UUID)
@@ -88,7 +91,9 @@ public class EnergyPelletEntity extends FireballEntity {
     // Constructors
     // -------------------------------------------------------------------------
 
-    /** Required by EntityType factory (world-only constructor). */
+    /**
+     * Required by EntityType factory (world-only constructor).
+     */
     public EnergyPelletEntity(EntityType<? extends EnergyPelletEntity> type, World world) {
         super(type, world);
     }
@@ -97,11 +102,7 @@ public class EnergyPelletEntity extends FireballEntity {
      * Convenience constructor used by EnergyPelletDispenserTileEntity when
      * spawning a new pellet.
      */
-    public EnergyPelletEntity(World world,
-                              double x, double y, double z,
-                              double velX, double velY, double velZ,
-                              @Nullable BlockPos dispenserPos,
-                              @Nullable ResourceLocation dispenserDimension) {
+    public EnergyPelletEntity(World world, double x, double y, double z, double velX, double velY, double velZ, @Nullable BlockPos dispenserPos, @Nullable ResourceLocation dispenserDimension) {
         super(world, x, y, z, velX, velY, velZ);
         this.dispenserPos = dispenserPos;
         this.dispenserDimension = dispenserDimension != null ? dispenserDimension.toString() : null;
@@ -126,10 +127,10 @@ public class EnergyPelletEntity extends FireballEntity {
     public void tick() {
         super.tick();
 
-        if (!this.level.isClientSide) {
+        if(!this.level.isClientSide) {
             int age = this.entityData.get(DATA_AGE) - 1;
             this.entityData.set(DATA_AGE, age);
-            if (age <= 0) {
+            if(age <= 0) {
                 this.remove();
             }
         }
@@ -143,27 +144,41 @@ public class EnergyPelletEntity extends FireballEntity {
     protected void onHitBlock(BlockRayTraceResult result) {
         // Do NOT call super — super ignites the block, which we do not want.
 
-        if (this.level.isClientSide) return;
+        if(this.level.isClientSide) {
+            return;
+        }
 
         // Reflect the power vector along the axis of the face that was hit.
-        switch (result.getDirection().getAxis()) {
-            case X: this.xPower = -this.xPower; break;
-            case Y: this.yPower = -this.yPower; break;
-            case Z: this.zPower = -this.zPower; break;
+        switch(result.getDirection().getAxis()) {
+            case X:
+                this.xPower = -this.xPower;
+                break;
+            case Y:
+                this.yPower = -this.yPower;
+                break;
+            case Z:
+                this.zPower = -this.zPower;
+                break;
         }
 
         Vector3d vel = this.getDeltaMovement();
-        switch (result.getDirection().getAxis()) {
-            case X: this.setDeltaMovement(-vel.x, vel.y, vel.z); break;
-            case Y: this.setDeltaMovement(vel.x, -vel.y, vel.z); break;
-            case Z: this.setDeltaMovement(vel.x, vel.y, -vel.z); break;
+        switch(result.getDirection().getAxis()) {
+            case X:
+                this.setDeltaMovement(-vel.x, vel.y, vel.z);
+                break;
+            case Y:
+                this.setDeltaMovement(vel.x, -vel.y, vel.z);
+                break;
+            case Z:
+                this.setDeltaMovement(vel.x, vel.y, -vel.z);
+                break;
         }
 
         // Check if this is a receiver block and hand off to it.
         TileEntity te = this.level.getBlockEntity(result.getBlockPos());
-        if (te instanceof EnergyPelletReceiverTileEntity) {
+        if(te instanceof EnergyPelletReceiverTileEntity) {
             EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) te;
-            if (!receiver.isHolding()) {
+            if(!receiver.isHolding()) {
                 receiver.catchPellet(dispenserPos, dispenserDimension);
                 this.remove();
             }
@@ -176,18 +191,17 @@ public class EnergyPelletEntity extends FireballEntity {
 
     @Override
     protected void onHitEntity(EntityRayTraceResult result) {
-        if (this.level.isClientSide) return;
+        if(this.level.isClientSide) {
+            return;
+        }
 
         Entity target = result.getEntity();
-        String registryNamespace = target.getType().getRegistryName() != null
-                ? target.getType().getRegistryName().getNamespace()
-                : "";
+        String registryNamespace = target.getType().getRegistryName() != null ? target.getType().getRegistryName().getNamespace() : "";
 
-        if (registryNamespace.equals(PORTALMOD_NAMESPACE)
-                || registryNamespace.equals(PortalModExtensions.MODID)) {
+        if(registryNamespace.equals(PORTALMOD_NAMESPACE) || registryNamespace.equals(PortalModExtensions.MODID)) {
             handlePortalModEntityCollision(target);
         } else {
-            if (target instanceof LivingEntity) {
+            if(target instanceof LivingEntity) {
                 target.hurt(net.minecraft.util.DamageSource.MAGIC, Float.MAX_VALUE);
             } else {
                 target.remove();
@@ -207,9 +221,9 @@ public class EnergyPelletEntity extends FireballEntity {
 
     @Override
     protected void onHit(RayTraceResult result) {
-        if (result.getType() == RayTraceResult.Type.BLOCK) {
+        if(result.getType() == RayTraceResult.Type.BLOCK) {
             onHitBlock((BlockRayTraceResult) result);
-        } else if (result.getType() == RayTraceResult.Type.ENTITY) {
+        } else if(result.getType() == RayTraceResult.Type.ENTITY) {
             onHitEntity((EntityRayTraceResult) result);
         }
         // Do NOT call super.onHit — it would trigger ignition logic.
@@ -223,12 +237,12 @@ public class EnergyPelletEntity extends FireballEntity {
     public void addAdditionalSaveData(CompoundNBT compound) {
         super.addAdditionalSaveData(compound);
         compound.putInt("Age", this.entityData.get(DATA_AGE));
-        if (dispenserPos != null) {
+        if(dispenserPos != null) {
             compound.putInt("DispenserX", dispenserPos.getX());
             compound.putInt("DispenserY", dispenserPos.getY());
             compound.putInt("DispenserZ", dispenserPos.getZ());
         }
-        if (dispenserDimension != null) {
+        if(dispenserDimension != null) {
             compound.putString("DispenserDim", dispenserDimension);
         }
     }
@@ -236,16 +250,13 @@ public class EnergyPelletEntity extends FireballEntity {
     @Override
     public void readAdditionalSaveData(CompoundNBT compound) {
         super.readAdditionalSaveData(compound);
-        if (compound.contains("Age")) {
+        if(compound.contains("Age")) {
             this.entityData.set(DATA_AGE, compound.getInt("Age"));
         }
-        if (compound.contains("DispenserX")) {
-            this.dispenserPos = new BlockPos(
-                    compound.getInt("DispenserX"),
-                    compound.getInt("DispenserY"),
-                    compound.getInt("DispenserZ"));
+        if(compound.contains("DispenserX")) {
+            this.dispenserPos = new BlockPos(compound.getInt("DispenserX"), compound.getInt("DispenserY"), compound.getInt("DispenserZ"));
         }
-        if (compound.contains("DispenserDim")) {
+        if(compound.contains("DispenserDim")) {
             this.dispenserDimension = compound.getString("DispenserDim");
         }
     }
