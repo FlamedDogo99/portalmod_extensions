@@ -24,87 +24,54 @@ import net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEnti
 
 import javax.annotation.Nullable;
 
-/**
- * Energy Pellet entity.
- * <p>
- * Extends FireballEntity (DamagingProjectileEntity) but neutralizes the two
- * behaviors that caused continuous speed increase:
- * <p>
- * 1. xPower/yPower/zPower accumulation — DamagingProjectileEntity.tick() adds
- * these to deltaMovement every tick, continuously accelerating the entity.
- * We use the type-only constructor (which leaves them at zero) and never set
- * them, so the add is always +0 and has no effect.
- * <p>
- * 2. Inertia scaling — tick() multiplies deltaMovement by getInertia() (0.95F
- * by default) every tick, creating drag.  We override getInertia() to return
- * 1.0F so deltaMovement is never damped.
- * <p>
- * With both neutralized, deltaMovement is the sole source of truth for velocity.
- * It is set once at spawn and only ever changed by the elastic reflection in
- * onHitBlock, giving true constant-velocity travel between bounces.
- * <p>
- * Carries the BlockPos and dimension key of the spawning dispenser so that when
- * a receiver catches it, the receiver can notify the dispenser in O(1).
+/*
+ * This is a crappy hack because I don't want to worry about implementing my own behavior
+ * for moving through portals, and fireballs already are handled. We have to stop the default
+ * behavior of constant acceleration manually
+ *
+ * Because of this, deltaMovement is the only correct source for velocity
+ *
+ * We track BlockPos and dimension of the dispenser that spawned it so that we can
+ * update recievers etc in O(1)
  */
 public class EnergyPelletEntity extends FireballEntity {
 
     /**
      * Maximum lifetime in ticks (10 seconds at 20 TPS).
      */
+    // TODO: arbitrary, maybe we should have a way to customize this in survival?
     public static final int INITIAL_AGE = 200;
 
     private static final String PORTALMOD_NAMESPACE = "portalmod";
-
-    // -------------------------------------------------------------------------
-    // Tracked data
-    // -------------------------------------------------------------------------
-
     private static final DataParameter<Integer> DATA_AGE = EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
-
-    // -------------------------------------------------------------------------
-    // Dispenser association
-    // -------------------------------------------------------------------------
 
     @Nullable
     private BlockPos dispenserPos = null;
     @Nullable
     private String dispenserDimension = null;
 
-    // -------------------------------------------------------------------------
-    // Constructors
-    // -------------------------------------------------------------------------
-
-    /**
-     * Required by EntityType factory.
-     */
     public EnergyPelletEntity(EntityType<? extends EnergyPelletEntity> type, World world) {
         super(type, world);
         // xPower/yPower/zPower are already zero — leave them that way.
     }
 
-    /**
-     * Spawn constructor called by EnergyPelletDispenserTileEntity.
-     * <p>
-     * Uses the type-only super constructor so that DamagingProjectileEntity's
-     * position+velocity constructor cannot normalise and rescale our velocity
-     * vector into xPower.  Position and deltaMovement are set manually below.
+    /*
+     * made by EnergyPelletDispenserTileEntity
+     *
+     * We use the type-only super so that DamagingProjectileEntity doesn't mess
+     * with our velocity, and we set position and deltaMovement manually
      */
     public EnergyPelletEntity(World world, double x, double y, double z, double velX, double velY, double velZ, @Nullable BlockPos dispenserPos, @Nullable ResourceLocation dispenserDimension) {
         super(net.portalmod_extensions.core.init.EntityInit.ENERGY_PELLET.get(), world);
-        // Place the entity. reapplyPosition() syncs the bounding box.
+        // reapplyPosition syncs the bounding box
         this.moveTo(x, y, z, this.yRot, this.xRot);
         this.reapplyPosition();
-        // Store velocity purely in deltaMovement. xPower/yPower/zPower remain
-        // zero, so DamagingProjectileEntity.tick()'s "+= power" adds nothing.
+        // Store velocity in deltaMovement, zero xPower/yPower/zPower remain
         this.setDeltaMovement(velX, velY, velZ);
         this.dispenserPos = dispenserPos;
         this.dispenserDimension = dispenserDimension != null ? dispenserDimension.toString() : null;
         this.entityData.set(DATA_AGE, INITIAL_AGE);
     }
-
-    // -------------------------------------------------------------------------
-    // EntityDataManager
-    // -------------------------------------------------------------------------
 
     @Override
     protected void defineSynchedData() {
@@ -112,24 +79,14 @@ public class EnergyPelletEntity extends FireballEntity {
         this.entityData.define(DATA_AGE, INITIAL_AGE);
     }
 
-    // -------------------------------------------------------------------------
-    // Inertia — disable drag so deltaMovement is never damped between ticks
-    // -------------------------------------------------------------------------
-
     @Override
     protected float getInertia() {
         return 1.0F;
     }
 
-    // -------------------------------------------------------------------------
-    // Tick / lifetime
-    // -------------------------------------------------------------------------
-
     @Override
     public void tick() {
-        super.tick(); // runs DamagingProjectileEntity.tick(): adds xPower (0),
-        // scales by getInertia() (1.0), moves, detects hits
-
+        super.tick();
         if(!this.level.isClientSide) {
             int age = this.entityData.get(DATA_AGE) - 1;
             this.entityData.set(DATA_AGE, age);
@@ -140,21 +97,13 @@ public class EnergyPelletEntity extends FireballEntity {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Collision — block
-    // -------------------------------------------------------------------------
-
     @Override
     protected void onHitBlock(BlockRayTraceResult result) {
-        // Do NOT call super — FireballEntity.onHitBlock causes an explosion.
-
+        // don't call super, as it will literally explode
         if(this.level.isClientSide) {
             return;
         }
-
-        // 100% elastic reflection: negate only the component on the hit axis.
-        // deltaMovement is the sole velocity store; xPower/yPower/zPower are
-        // all zero and do not need updating.
+        // basic block hit reflections
         Vector3d vel = this.getDeltaMovement();
         switch(result.getDirection().getAxis()) {
             case X:
@@ -168,20 +117,16 @@ public class EnergyPelletEntity extends FireballEntity {
                 break;
         }
 
-        // Check for receiver.
-        TileEntity te = this.level.getBlockEntity(result.getBlockPos());
-        if(te instanceof EnergyPelletReceiverTileEntity) {
-            EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) te;
+        // check for receiver collision
+        TileEntity tileEntity = this.level.getBlockEntity(result.getBlockPos());
+        if(tileEntity instanceof EnergyPelletReceiverTileEntity) {
+            EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) tileEntity;
             if(!receiver.isHolding()) {
                 receiver.catchPellet(dispenserPos, dispenserDimension);
                 this.remove();
             }
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Collision — entity
-    // -------------------------------------------------------------------------
 
     @Override
     protected void onHitEntity(EntityRayTraceResult result) {
@@ -206,94 +151,73 @@ public class EnergyPelletEntity extends FireballEntity {
     }
 
     private void handlePortalModEntityCollision(EntityRayTraceResult result, Entity target) {
-        // Elastic reflection off companion/storage/vintage cubes.
-        // All three are registered as net.portalmod.common.sorted.cube.Cube instances.
+        // bounce off of portalmod cubes
         if(target instanceof net.portalmod.common.sorted.cube.Cube) {
             reflectOffRotatedCube(result, (net.portalmod.common.sorted.cube.Cube) target);
             return;
         }
-        // All other portalmod entities: no-op for now.
+        // TODO: is there any other portalmod entity's we need to handle?
     }
 
-    /**
-     * Reflects the pellet off a rotating cube using 100% elastic collision,
-     * correctly accounting for the cube's Y-axis rotation (yRot).
-     * <p>
-     * Strategy:
-     *   1. Express the incoming ray in the cube's local space by translating
-     *      to the cube's centre and un-rotating by -yRot around Y.
-     *   2. Slab-test that local ray against the axis-aligned unit cube
-     *      (half-extent = 0.4 on all axes) to find which local face was hit.
-     *   3. Re-rotate that local normal back to world space by +yRot around Y.
-     *   4. Reflect deltaMovement off the world-space normal:
-     *         v' = v - 2(v·n)n
-     */
+    // per-face + rotation collision
     private void reflectOffRotatedCube(EntityRayTraceResult result, net.portalmod.common.sorted.cube.Cube cube) {
-        final double HALF = 0.4; // sized(0.8, 0.8) → half-extent 0.4
+        final double HALF = 0.4; // off of bounding box
 
         Vector3d cubeCenter = cube.getBoundingBox().getCenter();
-        Vector3d worldVel   = this.getDeltaMovement();
+        Vector3d worldVel = this.getDeltaMovement();
         Vector3d worldRayDir = worldVel.normalize();
-
-        // Transform ray origin into cube-local space (translate then rotate by -yRot around Y).
+        // cube space
         double angleRad = Math.toRadians(cube.yRot);
         double cosA = Math.cos(angleRad);
         double sinA = Math.sin(angleRad);
-
         Vector3d rel = this.position().subtract(cubeCenter);
-        // Rotate by -yRot:  x' = cosA*x - sinA*z,  z' = sinA*x + cosA*z
-        double lox =  cosA * rel.x - sinA * rel.z;
-        double loy =  rel.y;
-        double loz =  sinA * rel.x + cosA * rel.z;
+        // rotate by -yRot
+        double lox = cosA * rel.x - sinA * rel.z;
+        double loy = rel.y;
+        double loz = sinA * rel.x + cosA * rel.z;
 
-        double ldx =  cosA * worldRayDir.x - sinA * worldRayDir.z;
-        double ldy =  worldRayDir.y;
-        double ldz =  sinA * worldRayDir.x + cosA * worldRayDir.z;
+        double ldx = cosA * worldRayDir.x - sinA * worldRayDir.z;
+        double ldy = worldRayDir.y;
+        double ldz = sinA * worldRayDir.x + cosA * worldRayDir.z;
 
-        // Slab test: find the axis whose slab is entered last — that is the hit face.
-        double tEnter  = Double.NEGATIVE_INFINITY;
-        int    hitAxis = 1;       // default Y (top) if ray is degenerate
+        // ind axis of which slab is entered last for hit face
+        double tEnter = Double.NEGATIVE_INFINITY;
+        int hitAxis = 1; // default to top if something goes wrong
         boolean hitMin = true;
 
-        double[] lo = { lox, loy, loz };
-        double[] ld = { ldx, ldy, ldz };
+        double[] lo = {lox, loy, loz};
+        double[] ld = {ldx, ldy, ldz};
 
         for(int axis = 0; axis < 3; axis++) {
-            if(Math.abs(ld[axis]) < 1e-10) continue;
+            if(Math.abs(ld[axis]) < 1e-10) {
+                continue;
+            }
             double t1 = (-HALF - lo[axis]) / ld[axis];
-            double t2 = ( HALF - lo[axis]) / ld[axis];
+            double t2 = (HALF - lo[axis]) / ld[axis];
             boolean minFirst = t1 < t2;
             double tNear = minFirst ? t1 : t2;
             if(tNear > tEnter) {
-                tEnter  = tNear;
+                tEnter = tNear;
                 hitAxis = axis;
-                hitMin  = minFirst;
+                hitMin = minFirst;
             }
         }
 
-        // Local outward normal: +1 on the far side of entry, -1 on the near side.
-        double[] localNormal = { 0, 0, 0 };
+        // outward normal
+        double[] localNormal = {0, 0, 0};
         localNormal[hitAxis] = hitMin ? -1.0 : 1.0;
 
-        // Rotate local normal back to world space by +yRot.
+        // back to world space
         double lnx = localNormal[0];
         double lnz = localNormal[2];
-        double wnx =  cosA * lnx + sinA * lnz;
-        double wny =  localNormal[1];
+        double wnx = cosA * lnx + sinA * lnz;
+        double wny = localNormal[1];
         double wnz = -sinA * lnx + cosA * lnz;
 
-        // Reflect: v' = v - 2(v·n)n
+        // reflect
         double dot = worldVel.x * wnx + worldVel.y * wny + worldVel.z * wnz;
-        this.setDeltaMovement(
-            worldVel.x - 2 * dot * wnx,
-            worldVel.y - 2 * dot * wny,
-            worldVel.z - 2 * dot * wnz
-        );
+        this.setDeltaMovement(worldVel.x - 2 * dot * wnx, worldVel.y - 2 * dot * wny, worldVel.z - 2 * dot * wnz);
     }
-
-    // -------------------------------------------------------------------------
-    // FireballEntity/DamagingProjectileEntity overrides — prevent fire/explosion
-    // -------------------------------------------------------------------------
 
     @Override
     protected void onHit(RayTraceResult result) {
@@ -302,7 +226,7 @@ public class EnergyPelletEntity extends FireballEntity {
         } else if(result.getType() == RayTraceResult.Type.ENTITY) {
             onHitEntity((EntityRayTraceResult) result);
         }
-        // Do NOT call super — it would trigger FireballEntity's ignition logic.
+        // calling super would cause an explosion
     }
 
     @Override
@@ -310,26 +234,20 @@ public class EnergyPelletEntity extends FireballEntity {
         return false;
     }
 
-    // -------------------------------------------------------------------------
-    // Dispenser notification
-    // -------------------------------------------------------------------------
-
-    /**
-     * Called whenever the pellet removes itself for a reason the dispenser did
-     * NOT initiate (age expiry, entity-kill collision).  Tells the dispenser to
-     * clear its tracked UUID and, if still powered, immediately re-spawn.
-     * <p>
-     * NOT called on receiver-catch (the dispenser stays dormant while a receiver
-     * holds the pellet) and NOT called when the dispenser itself killed us via
-     * killPelletAndClearReceivers (it handles its own cleanup directly).
+    /*
+     * update associated dispenser when pellet removed for non-dispenser reason
      */
     private void notifyDispenserPelletGone() {
-        if(this.level == null || this.level.isClientSide || dispenserPos == null) return;
-        if(!(this.level instanceof net.minecraft.world.server.ServerWorld)) return;
+        if(this.level == null || this.level.isClientSide || dispenserPos == null) {
+            return;
+        }
+        if(!(this.level instanceof net.minecraft.world.server.ServerWorld)) {
+            return;
+        }
 
         net.minecraft.world.server.ServerWorld serverLevel = (net.minecraft.world.server.ServerWorld) this.level;
 
-        // Resolve the dispenser's world (normally the same as ours).
+        // resolve dispenser's world
         net.minecraft.world.server.ServerWorld dispenserWorld = serverLevel;
         if(dispenserDimension != null && !dispenserDimension.equals(serverLevel.dimension().location().toString())) {
             for(net.minecraft.world.server.ServerWorld w : serverLevel.getServer().getAllLevels()) {
@@ -345,10 +263,6 @@ public class EnergyPelletEntity extends FireballEntity {
             ((EnergyPelletDispenserTileEntity) te).onPelletExpired();
         }
     }
-
-    // -------------------------------------------------------------------------
-    // NBT
-    // -------------------------------------------------------------------------
 
     @Override
     public void addAdditionalSaveData(CompoundNBT compound) {
@@ -377,11 +291,7 @@ public class EnergyPelletEntity extends FireballEntity {
             this.dispenserDimension = compound.getString("DispenserDim");
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Accessors
-    // -------------------------------------------------------------------------
-
+    // just in case
     @Nullable
     public BlockPos getDispenserPos() {
         return dispenserPos;
@@ -395,10 +305,6 @@ public class EnergyPelletEntity extends FireballEntity {
     public int getAge() {
         return this.entityData.get(DATA_AGE);
     }
-
-    // -------------------------------------------------------------------------
-    // Network
-    // -------------------------------------------------------------------------
 
     @Override
     public IPacket<?> getAddEntityPacket() {

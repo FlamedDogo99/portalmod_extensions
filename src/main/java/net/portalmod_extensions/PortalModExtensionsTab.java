@@ -19,5 +19,5 @@ public class PortalModExtensionsTab extends ItemGroup {
     @Override
     public ItemStack makeIcon() {
         return new ItemStack(Items.DIRT);
-    }
+    } // TODO: find an artist
 }
