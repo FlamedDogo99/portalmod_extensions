@@ -6,7 +6,7 @@ import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.portalmod_extensions.common.blocks.EnergyPelletReceiverBlock;
-import net.portalmod_extensions.common.blocks.QuadBlockCorner;
+import net.portalmod.common.sorted.button.QuadBlockCorner;
 import net.portalmod_extensions.core.init.TileEntityTypeInit;
 
 import javax.annotation.Nullable;

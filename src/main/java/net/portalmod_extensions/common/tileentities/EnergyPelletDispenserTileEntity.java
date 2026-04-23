@@ -7,7 +7,6 @@ import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.server.ServerWorld;
 import net.portalmod_extensions.common.blocks.EnergyPelletDispenserBlock;
-import net.portalmod_extensions.common.blocks.QuadBlockCorner;
 import net.portalmod_extensions.common.entities.EnergyPelletEntity;
 import net.portalmod_extensions.core.init.TileEntityTypeInit;
 
@@ -63,7 +62,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
      * Called from EnergyPelletDispenserBlock#neighborChanged with the current
      * power state.  Detects rising and falling edges.
      */
-    public void onRedstoneChanged(boolean nowPowered) {
+    public void onPowerChanged(boolean nowPowered) {
         if (nowPowered && !wasPowered) {
             // Rising edge: spawn pellet if none exists.
             spawnPelletIfAbsent();

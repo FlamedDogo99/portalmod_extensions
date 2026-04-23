@@ -8,6 +8,9 @@ import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.IBlockReader;
 import net.minecraft.world.World;
+import net.portalmod.common.blocks.QuadBlock;
+import net.portalmod.common.sorted.antline.AntlineActivated;
+import net.portalmod.common.sorted.button.QuadBlockCorner;
 import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEntity;
 
 import javax.annotation.Nullable;
@@ -15,20 +18,19 @@ import javax.annotation.Nullable;
 /**
  * The Energy Pellet Dispenser.
  *
- * A 2×2 quad-block mountable on any face.  When receiving a redstone signal
- * (via any of the 2×2 base blocks) it spawns an EnergyPelletEntity.
- * When the signal is lost it kills the associated pellet and clears any
- * receiver that is holding that pellet.
+ * A 2×2 quad-block mountable on any face.  When activated by an antline signal
+ * it spawns an EnergyPelletEntity.  When deactivated it kills the pellet and
+ * clears any receiver that is holding that pellet.
  *
- * Redstone logic mirrors how a redstone_lamp decides it is powered:
- * the block checks whether ANY of the blocks it is placed on receives a
- * signal coming from the direction of the dispenser face.  Both hard (direct)
- * and soft (indirect) power are considered, matching Minecraft's
- * World#hasNeighborSignal / World#hasSignal semantics.
+ * Implements {@link AntlineActivated} so that connected antlines (and
+ * AntlineActivator blocks such as the super button) can drive it directly,
+ * matching how portalmod's own test-element receivers work.
  *
- * See SuperButtonBlock#neighborChanged in portalmod for the exact equivalent.
+ * The "horsed-on" face is the face the block is mounted on — the opposite of
+ * FACING.  Antlines connect from any direction not on the FACING axis,
+ * mirroring the convention used by SuperButtonBlock.
  */
-public class EnergyPelletDispenserBlock extends QuadBlock {
+public class EnergyPelletDispenserBlock extends QuadBlock implements AntlineActivated {
 
     public EnergyPelletDispenserBlock(Properties properties) {
         super(properties);
@@ -47,12 +49,11 @@ public class EnergyPelletDispenserBlock extends QuadBlock {
     }
 
     // -------------------------------------------------------------------------
-    // Tile entity
+    // Tile entity — only the main (UP_LEFT) corner owns a TE
     // -------------------------------------------------------------------------
 
     @Override
     public boolean hasTileEntity(BlockState state) {
-        // Only the UP_LEFT (main) corner owns the tile entity.
         return state.getValue(CORNER) == QuadBlockCorner.UP_LEFT;
     }
 
@@ -66,58 +67,74 @@ public class EnergyPelletDispenserBlock extends QuadBlock {
     }
 
     // -------------------------------------------------------------------------
-    // Redstone
+    // AntlineConnector (required by AntlineActivated)
     // -------------------------------------------------------------------------
 
     /**
-     * Called whenever a neighbouring block changes.  We check whether the
-     * 2×2 base is powered and notify the tile entity on the main corner.
+     * The surface this block is mounted on is opposite to FACING.
+     * If we face UP we are sitting on the DOWN side — identical to how
+     * SuperButtonBlock computes its horsed-on direction.
      */
     @Override
-    public void neighborChanged(BlockState state, World world, BlockPos pos,
-                                 Block block, BlockPos neighborPos, boolean isMoving) {
+    public Direction getHorsedOn(BlockState state) {
+        return state.getValue(FACING).getOpposite();
+    }
+
+    /**
+     * Antlines connect from any direction whose axis differs from the FACING
+     * axis — same rule as SuperButtonBlock.
+     */
+    @Override
+    public boolean antlineConnectsInDirection(Direction direction, BlockState state) {
+        return direction.getAxis() != state.getValue(FACING).getAxis();
+    }
+
+    // -------------------------------------------------------------------------
+    // AntlineActivated — called by the antline system on activation changes
+    // -------------------------------------------------------------------------
+
+    /**
+     * Delegates the power state to the main tile entity which handles
+     * pellet spawning (rising edge) and killing (falling edge).
+     */
+    @Override
+    public void onAntlineActivation(boolean active, BlockState state, World world, BlockPos pos) {
         if (world.isClientSide) return;
 
-        boolean nowPowered = isReceivingPower(state, world, pos);
-
-        // Find the main tile entity and forward the power-change event.
         BlockPos mainPos = getMainPosition(state, pos);
         TileEntity te = world.getBlockEntity(mainPos);
         if (te instanceof EnergyPelletDispenserTileEntity) {
-            ((EnergyPelletDispenserTileEntity) te).onRedstoneChanged(nowPowered);
+            ((EnergyPelletDispenserTileEntity) te).onPowerChanged(active);
         }
     }
 
-    /**
-     * Returns true if any of the four 2×2 base blocks is receiving a redstone
-     * signal directed toward the dispenser face.
-     *
-     * This mirrors how the redstone_lamp (and SuperButtonBlock in portalmod) work:
-     *   World#hasSignal(pos, direction) checks for BOTH strong and weak signal
-     *   coming from the given direction into the given position.
-     */
-    public boolean isReceivingPower(BlockState state, World world, BlockPos pos) {
-        Direction facing = state.getValue(FACING);
-        Direction inward = facing.getOpposite(); // direction toward the base blocks
+    // -------------------------------------------------------------------------
+    // Neighbor / placement hooks — trigger antline re-evaluation
+    // -------------------------------------------------------------------------
 
-        return getAllPositions(state, pos).stream().anyMatch(memberPos -> {
-            // The base block is one step inward from each member.
-            BlockPos basePos = memberPos.relative(inward);
-            // hasSignal checks whether basePos is receiving a signal from the
-            // direction that points back toward the dispenser (i.e. 'facing').
-            return world.hasSignal(basePos, facing);
-        });
+    @Override
+    public void neighborChanged(BlockState state, World world, BlockPos pos,
+                                Block block, BlockPos neighborPos, boolean isMoving) {
+        if (world.isClientSide) return;
+        this.updateAntlineActivation(state, world, pos);
+    }
+
+    @Override
+    public void onPlace(BlockState state, World world, BlockPos pos,
+                        BlockState oldState, boolean isMoving) {
+        // Announce ourselves to surrounding antlines, then check their state.
+        world.updateNeighborsAt(pos, this);
+        this.updateAntlineActivation(state, world, pos);
     }
 
     // -------------------------------------------------------------------------
-    // Destruction — clean up the tile entity on all corners
+    // Destruction — kill the pellet when the block is broken
     // -------------------------------------------------------------------------
 
     @Override
     public void onRemove(BlockState state, World world, BlockPos pos,
-                          BlockState newState, boolean isMoving) {
+                         BlockState newState, boolean isMoving) {
         if (!world.isClientSide && !state.is(newState.getBlock())) {
-            // If the main corner is being removed, kill the pellet first.
             BlockPos mainPos = getMainPosition(state, pos);
             TileEntity te = world.getBlockEntity(mainPos);
             if (te instanceof EnergyPelletDispenserTileEntity) {

@@ -6,6 +6,7 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.portalmod_extensions.core.init.BlockInit;
 import net.portalmod_extensions.core.init.EntityInit;
+import net.portalmod_extensions.core.init.ItemInit;
 import net.portalmod_extensions.core.init.TileEntityTypeInit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -21,6 +22,7 @@ public class PortalModExtensions {
 
         EntityInit.ENTITIES.register(bus);
         BlockInit.BLOCKS.register(bus);
+        ItemInit.ITEMS.register(bus);
         TileEntityTypeInit.TILE_ENTITY_TYPES.register(bus);
 
         MinecraftForge.EVENT_BUS.register(this);
