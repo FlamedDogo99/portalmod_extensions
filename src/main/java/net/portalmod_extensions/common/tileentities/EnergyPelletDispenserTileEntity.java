@@ -133,7 +133,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity implements ITick
         double oy = facing.getStepY() * 0.5;
         double oz = facing.getStepZ() * 0.5;
 
-        double speed = 0.5;
+        double speed = 0.125f;
         double vx = facing.getStepX() * speed;
         double vy = facing.getStepY() * speed;
         double vz = facing.getStepZ() * speed;
