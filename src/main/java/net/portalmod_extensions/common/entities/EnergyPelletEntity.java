@@ -37,7 +37,7 @@ import javax.annotation.Nullable;
  * We track BlockPos and dimension of the dispenser that spawned it so that we can
  * update recievers etc in O(1)
  */
-public class EnergyPelletEntity extends FireballEntity {
+public class EnergyPelletEntity extends FireballEntity implements net.portalmod.common.sorted.portal.PortalHandler {
 
     // TODO: arbitrary, maybe we should have a way to customize this in survival?
     public static final int INITIAL_AGE = 200;
@@ -76,6 +76,35 @@ public class EnergyPelletEntity extends FireballEntity {
     @Override
     protected float getInertia() {
         return 1.0F;
+    }
+
+    // stop player interaction
+    @Override
+    public boolean isPickable() {
+        return false;
+    }
+
+    @Override
+    public boolean hurt(@Nonnull net.minecraft.util.DamageSource source, float amount) {
+        return false;
+    }
+
+    // fix jittery movement
+    @Override
+    public void lerpTo(double x, double y, double z, float yaw, float pitch, int steps, boolean interpolate) {
+        super.lerpTo(x, y, z, yaw, pitch, 1, interpolate);
+    }
+
+    // reset age when going through portal
+    @Override
+    public void onTeleport(net.portalmod.common.sorted.portal.PortalEntity from, net.portalmod.common.sorted.portal.PortalEntity to) {
+        if(!this.level.isClientSide) {
+            this.entityData.set(DATA_AGE, INITIAL_AGE);
+        }
+    }
+
+    @Override
+    public void onTeleportPacket() {
     }
 
     @Override
@@ -246,7 +275,9 @@ public class EnergyPelletEntity extends FireballEntity {
      * update associated dispenser when pellet removed for non-dispenser reason
      */
     private void notifyDispenserPelletGone() {
-        if(notifiedDispenser) return;
+        if(notifiedDispenser) {
+            return;
+        }
         notifiedDispenser = true;
 
         if(this.level == null || this.level.isClientSide || dispenserPos == null) {
@@ -302,6 +333,7 @@ public class EnergyPelletEntity extends FireballEntity {
             this.dispenserDimension = compound.getString("DispenserDim");
         }
     }
+
     // just in case
     @Nullable
     public BlockPos getDispenserPos() {

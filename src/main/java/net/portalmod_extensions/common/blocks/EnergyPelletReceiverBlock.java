@@ -7,6 +7,9 @@ import net.minecraft.state.StateContainer;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.shapes.ISelectionContext;
+import net.minecraft.util.math.shapes.VoxelShape;
+import net.minecraft.util.math.shapes.VoxelShapes;
 import net.minecraft.world.IBlockReader;
 import net.minecraft.world.World;
 import net.portalmod.common.blocks.QuadBlock;
@@ -58,6 +61,21 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
     @Override
     public boolean antlineConnectsInDirection(Direction direction, BlockState state) {
         return direction.getAxis() != state.getValue(FACING).getAxis();
+    }
+
+    @Override
+    public VoxelShape getShape(BlockState state, IBlockReader world, BlockPos pos, ISelectionContext ctx) {
+        VoxelShape s = EnergyPelletDispenserBlock.SHAPES.get(state.getValue(FACING), state.getValue(CORNER));
+        return s != null ? s : VoxelShapes.block();
+    }
+
+    // nasty hack to for the pellet raycast
+    @Override
+    public VoxelShape getCollisionShape(BlockState state, IBlockReader world, BlockPos pos, ISelectionContext ctx) {
+        if(ctx.getEntity() instanceof net.portalmod_extensions.common.entities.EnergyPelletEntity) {
+            return VoxelShapes.block();
+        }
+        return getShape(state, world, pos, ctx);
     }
 
     @Override
