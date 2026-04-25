@@ -6,20 +6,65 @@ import net.minecraft.state.StateContainer;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.shapes.ISelectionContext;
+import net.minecraft.util.math.shapes.VoxelShape;
+import net.minecraft.util.math.shapes.VoxelShapes;
 import net.minecraft.world.IBlockReader;
 import net.minecraft.world.World;
 import net.portalmod.common.blocks.QuadBlock;
 import net.portalmod.common.sorted.antline.AntlineActivated;
 import net.portalmod.common.sorted.button.QuadBlockCorner;
+import net.portalmod.core.math.BiHashMap;
+import net.portalmod.core.math.Mat4;
+import net.portalmod.core.math.Vec3;
+import net.portalmod.core.math.VoxelShapeGroup;
 import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEntity;
 
 import javax.annotation.Nullable;
 
 public class EnergyPelletDispenserBlock extends QuadBlock implements AntlineActivated {
 
+    static final BiHashMap<Direction, QuadBlockCorner, VoxelShape> SHAPES = new BiHashMap<>();
+
+    static {
+        VoxelShapeGroup base = new VoxelShapeGroup.Builder(0, 0, 0, 16, 6, 16).build();
+        for(Direction facing : Direction.values()) {
+            for(QuadBlockCorner corner : QuadBlockCorner.values()) {
+                Mat4 matrix = Mat4.identity();
+                matrix.translate(new Vec3(.5));
+
+                if(facing.getAxisDirection() == Direction.AxisDirection.NEGATIVE) {
+                    matrix.scale(new Vec3(facing.getNormal()).mul(2).add(1));
+                    matrix.rotateDeg(new Vec3(facing.getNormal()).to3f(), corner.getRot() - 90);
+                } else {
+                    matrix.rotateDeg(new Vec3(facing.getNormal()).to3f(), corner.getRot());
+                }
+
+                if(facing.getAxis() == Direction.Axis.X) {
+                    matrix.rotateDeg(net.minecraft.util.math.vector.Vector3f.ZP, -90).rotateDeg(net.minecraft.util.math.vector.Vector3f.YP, 90);
+                }
+
+                if(facing.getAxis() == Direction.Axis.Z) {
+                    matrix.rotateDeg(net.minecraft.util.math.vector.Vector3f.XP, 90);
+                }
+
+                matrix.rotateDeg(net.minecraft.util.math.vector.Vector3f.YP, 90);
+                matrix.translate(new Vec3(-.5));
+
+                SHAPES.put(facing, corner, base.clone().transform(matrix).getShape());
+            }
+        }
+    }
+
     public EnergyPelletDispenserBlock(Properties properties) {
         super(properties);
         this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.UP).setValue(CORNER, QuadBlockCorner.UP_LEFT));
+    }
+
+    @Override
+    public VoxelShape getShape(BlockState state, IBlockReader world, BlockPos pos, ISelectionContext ctx) {
+        VoxelShape s = SHAPES.get(state.getValue(FACING), state.getValue(CORNER));
+        return s != null ? s : VoxelShapes.block();
     }
 
     @Override

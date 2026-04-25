@@ -1,0 +1,8 @@
+{
+    "block.energy_pellet_dispenser.shoot": {
+        "sounds": [
+            "portalmod_extensions:block/energy_pellet_dispenser/shoot"
+        ],
+        "subtitle": "subtitles.block.energy_pellet_dispenser.shoot"
+    }
+}

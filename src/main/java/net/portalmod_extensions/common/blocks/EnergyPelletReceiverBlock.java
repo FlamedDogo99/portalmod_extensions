@@ -7,6 +7,9 @@ import net.minecraft.state.StateContainer;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.shapes.ISelectionContext;
+import net.minecraft.util.math.shapes.VoxelShape;
+import net.minecraft.util.math.shapes.VoxelShapes;
 import net.minecraft.world.IBlockReader;
 import net.minecraft.world.World;
 import net.portalmod.common.blocks.QuadBlock;
@@ -61,6 +64,21 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
     }
 
     @Override
+    public VoxelShape getShape(BlockState state, IBlockReader world, BlockPos pos, ISelectionContext ctx) {
+        VoxelShape s = EnergyPelletDispenserBlock.SHAPES.get(state.getValue(FACING), state.getValue(CORNER));
+        return s != null ? s : VoxelShapes.block();
+    }
+
+    // nasty hack to for the pellet raycast
+    @Override
+    public VoxelShape getCollisionShape(BlockState state, IBlockReader world, BlockPos pos, ISelectionContext ctx) {
+        if(ctx.getEntity() instanceof net.portalmod_extensions.common.entities.EnergyPelletEntity) {
+            return VoxelShapes.block();
+        }
+        return getShape(state, world, pos, ctx);
+    }
+
+    @Override
     public boolean isSignalSource(BlockState state) {
         return true;
     }
@@ -70,8 +88,7 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
         if(!state.getValue(HOLDING)) {
             return 0;
         }
-        Direction inward = state.getValue(FACING).getOpposite();
-        return direction == inward ? 15 : 0;
+        return direction == state.getValue(FACING) ? 15 : 0;
     }
 
     @Override
@@ -96,14 +113,12 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
                     ((net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity) te).notifyDispenserOfRemoval();
                 }
             }
-            // redstone update.
-            updateAllNeighbors(world, pos, state);
-            // update antlines around removal
-            // FIXME: this sometimes just silently fails?
             if(state.getValue(HOLDING)) {
                 for(BlockPos p : getAllPositions(state, pos)) {
                     world.updateNeighborsAt(p, this);
                 }
+            } else {
+                updateAllNeighbors(world, pos, state);
             }
         }
         super.onRemove(state, world, pos, newState, isMoving);

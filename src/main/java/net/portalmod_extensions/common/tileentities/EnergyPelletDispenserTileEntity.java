@@ -3,6 +3,7 @@ package net.portalmod_extensions.common.tileentities;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.nbt.CompoundNBT;
+import net.minecraft.tileentity.ITickableTileEntity;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
@@ -10,7 +11,10 @@ import net.minecraft.world.server.ServerWorld;
 import net.minecraftforge.common.util.Constants;
 import net.portalmod_extensions.common.blocks.EnergyPelletDispenserBlock;
 import net.portalmod_extensions.common.entities.EnergyPelletEntity;
+import net.portalmod_extensions.core.init.SoundInit;
 import net.portalmod_extensions.core.init.TileEntityTypeInit;
+import net.portalmod_extensions.core.packet.PacketHandler;
+import net.portalmod_extensions.core.packet.SDispenserAnimationPacket;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -24,7 +28,27 @@ import java.util.UUID;
  * For redstone, rising edge: spawns a pellet if needed
  * falling edge is kill pellet and clear receivers if needed
  */
-public class EnergyPelletDispenserTileEntity extends TileEntity {
+public class EnergyPelletDispenserTileEntity extends TileEntity implements ITickableTileEntity {
+
+    public static final int ANIMATION_LENGTH = 20;
+    public int animationProgress = 0;
+    public int prevAnimationProgress = 0;
+
+    public void startShootAnimation() {
+        this.prevAnimationProgress = this.animationProgress;
+        this.animationProgress = ANIMATION_LENGTH;
+    }
+
+    @Override
+    public void tick() {
+        if(this.level == null || !this.level.isClientSide) {
+            return;
+        }
+        prevAnimationProgress = animationProgress;
+        if(animationProgress > 0) {
+            animationProgress--;
+        }
+    }
 
     private boolean wasPowered = false;
 
@@ -60,8 +84,6 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
     public void unregisterReceiver() {
         this.receiverPos = null;
         this.receiverDimension = null;
-        // pelletUUID is already null (cleared in registerReceiver when the
-        // receiver caught the pellet), so spawnPelletIfAbsent's guard passes.
         setChanged();
         if(wasPowered) {
             spawnPelletIfAbsent();
@@ -70,12 +92,13 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
 
     public void onPowerChanged(boolean nowPowered) {
         net.portalmod_extensions.PortalModExtensions.LOGGER.info("onPowerChanged: " + nowPowered);
-        if(nowPowered && !wasPowered) {
+        boolean wasPoweredBefore = wasPowered;
+        wasPowered = nowPowered;
+        if(nowPowered && !wasPoweredBefore) {
             spawnPelletIfAbsent();
-        } else if(!nowPowered && wasPowered) {
+        } else if(!nowPowered && wasPoweredBefore) {
             killPelletAndClearReceivers();
         }
-        wasPowered = nowPowered;
     }
 
     private void spawnPelletIfAbsent() {
@@ -111,7 +134,7 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
         double oy = facing.getStepY() * 0.5;
         double oz = facing.getStepZ() * 0.5;
 
-        double speed = 0.5;
+        double speed = 0.125f;
         double vx = facing.getStepX() * speed;
         double vy = facing.getStepY() * speed;
         double vz = facing.getStepZ() * speed;
@@ -123,6 +146,10 @@ public class EnergyPelletDispenserTileEntity extends TileEntity {
         serverLevel.addFreshEntity(pellet);
         pelletUUID = pellet.getUUID();
         setChanged();
+
+        serverLevel.playSound(null, cx + ox, cy + oy, cz + oz, SoundInit.ENERGY_PELLET_DISPENSER_SHOOT.get(), net.minecraft.util.SoundCategory.BLOCKS, 1.0f, 1.0f);
+
+        PacketHandler.sendToTrackingChunk(new SDispenserAnimationPacket(this.getBlockPos()), this.getBlockPos(), serverLevel);
     }
 
     public void killPelletAndClearReceivers() {

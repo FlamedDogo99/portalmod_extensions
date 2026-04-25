@@ -2,6 +2,7 @@ package net.portalmod_extensions.common.tileentities;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.nbt.CompoundNBT;
+import net.minecraft.tileentity.ITickableTileEntity;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
@@ -11,17 +12,41 @@ import net.minecraftforge.common.util.Constants;
 import net.portalmod_extensions.common.blocks.EnergyPelletReceiverBlock;
 import net.portalmod.common.sorted.button.QuadBlockCorner;
 import net.portalmod_extensions.core.init.TileEntityTypeInit;
+import net.portalmod_extensions.core.packet.PacketHandler;
+import net.portalmod_extensions.core.packet.SReceiverAnimationPacket;
 
 import javax.annotation.Nullable;
 
 /*
- * tile entity for dispenser
+ * tile entity for receiver
  * stored on up left corner block
  * This tracks if the receiver is holding a pellet, BlockPos and dimension of dispenser associated with held pellet
  *
  * when holding, emits redstone level 15
  */
-public class EnergyPelletReceiverTileEntity extends TileEntity {
+public class EnergyPelletReceiverTileEntity extends TileEntity implements ITickableTileEntity {
+
+    public static final int ANIMATION_LENGTH = 20;
+    public int animationProgress = 0;
+    public int prevAnimationProgress = 0;
+
+    public void startCatchAnimation() {
+        this.prevAnimationProgress = this.animationProgress;
+        this.animationProgress = ANIMATION_LENGTH;
+    }
+
+    @Override
+    public void tick() {
+        if(this.level == null || !this.level.isClientSide) {
+            return;
+        }
+        prevAnimationProgress = animationProgress;
+        if(animationProgress > 0) {
+            animationProgress--;
+        }
+    }
+
+    // -------------------------------------------------------------------------
 
     @Nullable
     private BlockPos heldDispenserPos = null;
@@ -54,13 +79,16 @@ public class EnergyPelletReceiverTileEntity extends TileEntity {
 
         this.heldDispenserPos = dispenserPos;
         this.heldDispenserDimension = dispenserDimension;
-        setHoldingState(true);
         setChanged();
-
-        // notify dispenser
         if(dispenserPos != null && dispenserDimension != null) {
             notifyDispenser(dispenserPos, dispenserDimension, true);
         }
+
+        if(this.level instanceof ServerWorld) {
+            PacketHandler.sendToTrackingChunk(new SReceiverAnimationPacket(this.getBlockPos()), this.getBlockPos(), (ServerWorld) this.level);
+        }
+
+        setHoldingState(true);
     }
 
     // called when broken while holding a pellet
@@ -86,7 +114,6 @@ public class EnergyPelletReceiverTileEntity extends TileEntity {
         }
         ServerWorld serverWorld = (ServerWorld) this.level;
 
-        // Find the world that owns the dispenser.
         ServerWorld dispenserWorld = findWorld(serverWorld, dispenserDimension);
         if(dispenserWorld == null) {
             return;

@@ -21,7 +21,10 @@ import net.minecraftforge.fml.network.NetworkHooks;
 import net.portalmod_extensions.PortalModExtensions;
 import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEntity;
 import net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity;
+import net.minecraft.block.BlockState;
+import net.portalmod_extensions.common.blocks.EnergyPelletReceiverBlock;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 /*
@@ -34,16 +37,14 @@ import javax.annotation.Nullable;
  * We track BlockPos and dimension of the dispenser that spawned it so that we can
  * update recievers etc in O(1)
  */
-public class EnergyPelletEntity extends FireballEntity {
+public class EnergyPelletEntity extends FireballEntity implements net.portalmod.common.sorted.portal.PortalHandler {
 
-    /**
-     * Maximum lifetime in ticks (10 seconds at 20 TPS).
-     */
     // TODO: arbitrary, maybe we should have a way to customize this in survival?
     public static final int INITIAL_AGE = 200;
 
     private static final String PORTALMOD_NAMESPACE = "portalmod";
     private static final DataParameter<Integer> DATA_AGE = EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
+    private boolean notifiedDispenser = false;
 
     @Nullable
     private BlockPos dispenserPos = null;
@@ -52,15 +53,8 @@ public class EnergyPelletEntity extends FireballEntity {
 
     public EnergyPelletEntity(EntityType<? extends EnergyPelletEntity> type, World world) {
         super(type, world);
-        // xPower/yPower/zPower are already zero — leave them that way.
     }
 
-    /*
-     * made by EnergyPelletDispenserTileEntity
-     *
-     * We use the type-only super so that DamagingProjectileEntity doesn't mess
-     * with our velocity, and we set position and deltaMovement manually
-     */
     public EnergyPelletEntity(World world, double x, double y, double z, double velX, double velY, double velZ, @Nullable BlockPos dispenserPos, @Nullable ResourceLocation dispenserDimension) {
         super(net.portalmod_extensions.core.init.EntityInit.ENERGY_PELLET.get(), world);
         // reapplyPosition syncs the bounding box
@@ -84,6 +78,35 @@ public class EnergyPelletEntity extends FireballEntity {
         return 1.0F;
     }
 
+    // stop player interaction
+    @Override
+    public boolean isPickable() {
+        return false;
+    }
+
+    @Override
+    public boolean hurt(@Nonnull net.minecraft.util.DamageSource source, float amount) {
+        return false;
+    }
+
+    // fix jittery movement
+    @Override
+    public void lerpTo(double x, double y, double z, float yaw, float pitch, int steps, boolean interpolate) {
+        super.lerpTo(x, y, z, yaw, pitch, 1, interpolate);
+    }
+
+    // reset age when going through portal
+    @Override
+    public void onTeleport(net.portalmod.common.sorted.portal.PortalEntity from, net.portalmod.common.sorted.portal.PortalEntity to) {
+        if(!this.level.isClientSide) {
+            this.entityData.set(DATA_AGE, INITIAL_AGE);
+        }
+    }
+
+    @Override
+    public void onTeleportPacket() {
+    }
+
     @Override
     public void tick() {
         super.tick();
@@ -98,7 +121,15 @@ public class EnergyPelletEntity extends FireballEntity {
     }
 
     @Override
-    protected void onHitBlock(BlockRayTraceResult result) {
+    public void remove() {
+        if(!this.level.isClientSide) {
+            notifyDispenserPelletGone();
+        }
+        super.remove();
+    }
+
+    @Override
+    protected void onHitBlock(@Nonnull BlockRayTraceResult result) {
         // don't call super, as it will literally explode
         if(this.level.isClientSide) {
             return;
@@ -117,19 +148,25 @@ public class EnergyPelletEntity extends FireballEntity {
                 break;
         }
 
-        // check for receiver collision
-        TileEntity tileEntity = this.level.getBlockEntity(result.getBlockPos());
-        if(tileEntity instanceof EnergyPelletReceiverTileEntity) {
-            EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) tileEntity;
-            if(!receiver.isHolding()) {
-                receiver.catchPellet(dispenserPos, dispenserDimension);
-                this.remove();
+        // check for receiver collision, resolve for up left tile entity
+        BlockPos hitPos = result.getBlockPos();
+        BlockState hitState = this.level.getBlockState(hitPos);
+        if(hitState.getBlock() instanceof EnergyPelletReceiverBlock) {
+            EnergyPelletReceiverBlock receiverBlock = (EnergyPelletReceiverBlock) hitState.getBlock();
+            BlockPos mainPos = receiverBlock.getMainPosition(hitState, hitPos);
+            TileEntity tileEntity = this.level.getBlockEntity(mainPos);
+            if(tileEntity instanceof EnergyPelletReceiverTileEntity) {
+                EnergyPelletReceiverTileEntity receiver = (EnergyPelletReceiverTileEntity) tileEntity;
+                if(!receiver.isHolding()) {
+                    receiver.catchPellet(dispenserPos, dispenserDimension);
+                    this.remove();
+                }
             }
         }
     }
 
     @Override
-    protected void onHitEntity(EntityRayTraceResult result) {
+    protected void onHitEntity(@Nonnull EntityRayTraceResult result) {
         if(this.level.isClientSide) {
             return;
         }
@@ -238,6 +275,11 @@ public class EnergyPelletEntity extends FireballEntity {
      * update associated dispenser when pellet removed for non-dispenser reason
      */
     private void notifyDispenserPelletGone() {
+        if(notifiedDispenser) {
+            return;
+        }
+        notifiedDispenser = true;
+
         if(this.level == null || this.level.isClientSide || dispenserPos == null) {
             return;
         }
@@ -265,7 +307,7 @@ public class EnergyPelletEntity extends FireballEntity {
     }
 
     @Override
-    public void addAdditionalSaveData(CompoundNBT compound) {
+    public void addAdditionalSaveData(@Nonnull CompoundNBT compound) {
         super.addAdditionalSaveData(compound);
         compound.putInt("Age", this.entityData.get(DATA_AGE));
         if(dispenserPos != null) {
@@ -279,7 +321,7 @@ public class EnergyPelletEntity extends FireballEntity {
     }
 
     @Override
-    public void readAdditionalSaveData(CompoundNBT compound) {
+    public void readAdditionalSaveData(@Nonnull CompoundNBT compound) {
         super.readAdditionalSaveData(compound);
         if(compound.contains("Age")) {
             this.entityData.set(DATA_AGE, compound.getInt("Age"));
@@ -291,6 +333,7 @@ public class EnergyPelletEntity extends FireballEntity {
             this.dispenserDimension = compound.getString("DispenserDim");
         }
     }
+
     // just in case
     @Nullable
     public BlockPos getDispenserPos() {

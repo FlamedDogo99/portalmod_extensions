@@ -1,0 +1,12 @@
+{
+    "variants": {
+        "corner=up_left,holding=false":    { "model": "portalmod_extensions:block/energy_pellet_receiver" },
+        "corner=up_right,holding=false":   { "model": "portalmod_extensions:block/energy_pellet_receiver" },
+        "corner=down_left,holding=false":  { "model": "portalmod_extensions:block/energy_pellet_receiver" },
+        "corner=down_right,holding=false": { "model": "portalmod_extensions:block/energy_pellet_receiver" },
+        "corner=up_left,holding=true":     { "model": "portalmod_extensions:block/energy_pellet_receiver_holding" },
+        "corner=up_right,holding=true":    { "model": "portalmod_extensions:block/energy_pellet_receiver_holding" },
+        "corner=down_left,holding=true":   { "model": "portalmod_extensions:block/energy_pellet_receiver_holding" },
+        "corner=down_right,holding=true":  { "model": "portalmod_extensions:block/energy_pellet_receiver_holding" }
+    }
+}
