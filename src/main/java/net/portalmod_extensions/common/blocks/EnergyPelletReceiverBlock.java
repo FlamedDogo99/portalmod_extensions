@@ -70,8 +70,7 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
         if(!state.getValue(HOLDING)) {
             return 0;
         }
-        Direction inward = state.getValue(FACING).getOpposite();
-        return direction == inward ? 15 : 0;
+        return direction == state.getValue(FACING) ? 15 : 0;
     }
 
     @Override
@@ -96,14 +95,12 @@ public class EnergyPelletReceiverBlock extends QuadBlock implements AntlineActiv
                     ((net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity) te).notifyDispenserOfRemoval();
                 }
             }
-            // redstone update.
-            updateAllNeighbors(world, pos, state);
-            // update antlines around removal
-            // FIXME: this sometimes just silently fails?
             if(state.getValue(HOLDING)) {
                 for(BlockPos p : getAllPositions(state, pos)) {
                     world.updateNeighborsAt(p, this);
                 }
+            } else {
+                updateAllNeighbors(world, pos, state);
             }
         }
         super.onRemove(state, world, pos, newState, isMoving);

@@ -44,6 +44,7 @@ public class EnergyPelletEntity extends FireballEntity {
 
     private static final String PORTALMOD_NAMESPACE = "portalmod";
     private static final DataParameter<Integer> DATA_AGE = EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
+    private boolean notifiedDispenser = false;
 
     @Nullable
     private BlockPos dispenserPos = null;
@@ -88,6 +89,14 @@ public class EnergyPelletEntity extends FireballEntity {
                 this.remove();
             }
         }
+    }
+
+    @Override
+    public void remove() {
+        if(!this.level.isClientSide) {
+            notifyDispenserPelletGone();
+        }
+        super.remove();
     }
 
     @Override
@@ -237,6 +246,9 @@ public class EnergyPelletEntity extends FireballEntity {
      * update associated dispenser when pellet removed for non-dispenser reason
      */
     private void notifyDispenserPelletGone() {
+        if(notifiedDispenser) return;
+        notifiedDispenser = true;
+
         if(this.level == null || this.level.isClientSide || dispenserPos == null) {
             return;
         }

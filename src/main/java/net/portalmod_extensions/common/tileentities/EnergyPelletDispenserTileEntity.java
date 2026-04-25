@@ -92,12 +92,13 @@ public class EnergyPelletDispenserTileEntity extends TileEntity implements ITick
 
     public void onPowerChanged(boolean nowPowered) {
         net.portalmod_extensions.PortalModExtensions.LOGGER.info("onPowerChanged: " + nowPowered);
-        if(nowPowered && !wasPowered) {
+        boolean wasPoweredBefore = wasPowered;
+        wasPowered = nowPowered;
+        if(nowPowered && !wasPoweredBefore) {
             spawnPelletIfAbsent();
-        } else if(!nowPowered && wasPowered) {
+        } else if(!nowPowered && wasPoweredBefore) {
             killPelletAndClearReceivers();
         }
-        wasPowered = nowPowered;
     }
 
     private void spawnPelletIfAbsent() {

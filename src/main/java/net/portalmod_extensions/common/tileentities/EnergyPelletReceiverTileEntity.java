@@ -79,17 +79,16 @@ public class EnergyPelletReceiverTileEntity extends TileEntity implements ITicka
 
         this.heldDispenserPos = dispenserPos;
         this.heldDispenserDimension = dispenserDimension;
-        setHoldingState(true);
         setChanged();
+        if(dispenserPos != null && dispenserDimension != null) {
+            notifyDispenser(dispenserPos, dispenserDimension, true);
+        }
 
         if(this.level instanceof ServerWorld) {
             PacketHandler.sendToTrackingChunk(new SReceiverAnimationPacket(this.getBlockPos()), this.getBlockPos(), (ServerWorld) this.level);
         }
 
-        // notify dispenser
-        if(dispenserPos != null && dispenserDimension != null) {
-            notifyDispenser(dispenserPos, dispenserDimension, true);
-        }
+        setHoldingState(true);
     }
 
     // called when broken while holding a pellet
