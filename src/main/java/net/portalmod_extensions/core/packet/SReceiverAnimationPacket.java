@@ -12,7 +12,7 @@ import net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEnti
 import java.util.function.Supplier;
 
 /**
- * Sent server→client whenever the receiver catches a pellet.
+ * Sent server to client whenever the receiver catches a pellet.
  * The client uses this to start the catch animation on the matching tile entity.
  */
 public class SReceiverAnimationPacket {
@@ -32,18 +32,18 @@ public class SReceiverAnimationPacket {
     }
 
     public static boolean handle(SReceiverAnimationPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() ->
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> handleClient(packet))
-        );
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> handleClient(packet)));
         ctx.get().setPacketHandled(true);
         return true;
     }
 
     private static void handleClient(SReceiverAnimationPacket packet) {
-        if (Minecraft.getInstance().level == null) return;
-        TileEntity te = Minecraft.getInstance().level.getBlockEntity(packet.pos);
-        if (te instanceof EnergyPelletReceiverTileEntity) {
-            ((EnergyPelletReceiverTileEntity) te).startCatchAnimation();
+        if(Minecraft.getInstance().level == null) {
+            return;
+        }
+        TileEntity tileEntity = Minecraft.getInstance().level.getBlockEntity(packet.pos);
+        if(tileEntity instanceof EnergyPelletReceiverTileEntity) {
+            ((EnergyPelletReceiverTileEntity) tileEntity).startCatchAnimation();
         }
     }
 }
