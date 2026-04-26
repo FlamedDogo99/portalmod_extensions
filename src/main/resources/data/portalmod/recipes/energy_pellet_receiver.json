@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ifi",
+    "#a#"
+  ],
+  "key": {
+    "i": {
+      "item": "minecraft:iron_nugget"
+    },
+    "#": {
+      "item": "minecraft:blackstone"
+    },
+    "f": {
+      "item": "minecraft:daylight_detector"
+    },
+    "a": {
+      "item": "portalmod:antline"
+    }
+  },
+  "result": {
+    "item": "portalmod_extensions:energy_pellet_receiver"
+  }
+}

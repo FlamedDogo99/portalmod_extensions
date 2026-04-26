@@ -1,0 +1,23 @@
+{
+  "itemGroup.portalmod_extensions": "Portal Mod Extensions",
+
+  "block.portalmod_extensions.energy_pellet_dispenser": "Energy Pellet Dispenser",
+  "block.portalmod_extensions.energy_pellet_receiver": "Energy Pellet Receiver",
+
+  "item.portalmod_extensions.energy_pellet_dispenser": "Energy Pellet Dispenser",
+  "item.portalmod_extensions.energy_pellet_receiver": "Energy Pellet Receiver",
+
+  "subtitles.portalmod_extensions.block.energy_pellet_dispenser.shoot": "Pellet Dispenser fires",
+
+  "tooltip.portalmod_extensions.hold_control": "Hold %s for info",
+
+  "tooltip.portalmod_extensions.energy_pellet_dispenser_1": "Auto-spawns §aEnergy Pellets§7 when active",
+  "tooltip.portalmod_extensions.energy_pellet_dispenser_2": "- Activated by adjacent §bAntline Indicators§7",
+  "tooltip.portalmod_extensions.energy_pellet_dispenser_3": "- Activated by §cRedstone§7 from below",
+
+
+  "tooltip.portalmod_extensions.energy_pellet_receiver_1": "Catches §aEnergy Pellets§7 when empty",
+  "tooltip.portalmod_extensions.energy_pellet_receiver_2": "- Activates §bAntlines§7",
+  "tooltip.portalmod_extensions.energy_pellet_receiver_3": "- Powers §cRedstone§7 from below"
+
+}
