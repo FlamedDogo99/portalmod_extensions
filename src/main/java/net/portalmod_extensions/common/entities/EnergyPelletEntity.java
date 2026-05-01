@@ -174,32 +174,110 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
             }
         }
     }
-
+    // This is ugly and inelegant, but I'm tired of messing up rotation matrices
     private boolean tryVanillaStairDeflect(BlockState state, Direction hitFace) {
         if(!(state.getBlock() instanceof StairsBlock)) {
             return false;
         }
-        Direction stairFacing = state.getValue(BlockStateProperties.HORIZONTAL_FACING);
+        Direction facing = state.getValue(BlockStateProperties.HORIZONTAL_FACING);
         Half half = state.getValue(BlockStateProperties.HALF);
-
-        if(hitFace != stairFacing.getOpposite()) {
-            return false;
-        }
+        boolean bottom = (half == Half.BOTTOM);
 
         Vector3d vel = this.getDeltaMovement();
-        double ySign = (half == Half.BOTTOM) ? 1.0 : -1.0;
+        double x = vel.x, y = vel.y, z = vel.z;
 
-        switch(hitFace.getAxis()) {
-            case X:
-                this.setDeltaMovement(0, Math.abs(vel.x) * ySign, vel.z);
-                break;
-            case Z:
-                this.setDeltaMovement(vel.x, Math.abs(vel.z) * ySign, 0);
-                break;
+        switch(facing) {
+            case NORTH:
+                if(bottom) {
+                    if(z < 0 && hitFace == Direction.SOUTH) {
+                        setDeltaMovement(x, -z, 0);
+                        return true;
+                    }
+                    if(y < 0 && hitFace == Direction.UP) {
+                        setDeltaMovement(x, 0, -y);
+                        return true;
+                    }
+                } else {
+                    if(z < 0 && hitFace == Direction.SOUTH) {
+                        setDeltaMovement(x, z, 0);
+                        return true;
+                    }
+                    if(y > 0 && hitFace == Direction.DOWN) {
+                        setDeltaMovement(x, 0, y);
+                        return true;
+                    }
+                }
+                return false;
+
+            case SOUTH:
+                if(bottom) {
+                    if(z > 0 && hitFace == Direction.NORTH) {
+                        setDeltaMovement(x, z, 0);
+                        return true;
+                    }
+                    if(y < 0 && hitFace == Direction.UP) {
+                        setDeltaMovement(x, 0, y);
+                        return true;
+                    }
+                } else {
+                    if(z > 0 && hitFace == Direction.NORTH) {
+                        setDeltaMovement(x, -z, 0);
+                        return true;
+                    }
+                    if(y > 0 && hitFace == Direction.DOWN) {
+                        setDeltaMovement(x, 0, -y);
+                        return true;
+                    }
+                }
+                return false;
+
+            case WEST:
+                if(bottom) {
+                    if(x < 0 && hitFace == Direction.EAST) {
+                        setDeltaMovement(0, -x, z);
+                        return true;
+                    }
+                    if(y < 0 && hitFace == Direction.UP) {
+                        setDeltaMovement(-y, 0, z);
+                        return true;
+                    }
+                } else {
+                    if(x < 0 && hitFace == Direction.EAST) {
+                        setDeltaMovement(0, x, z);
+                        return true;
+                    }
+                    if(y > 0 && hitFace == Direction.DOWN) {
+                        setDeltaMovement(y, 0, z);
+                        return true;
+                    }
+                }
+                return false;
+
+            case EAST:
+                if(bottom) {
+                    if(x > 0 && hitFace == Direction.WEST) {
+                        setDeltaMovement(0, x, z);
+                        return true;
+                    }
+                    if(y < 0 && hitFace == Direction.UP) {
+                        setDeltaMovement(y, 0, z);
+                        return true;
+                    }
+                } else {
+                    if(x > 0 && hitFace == Direction.WEST) {
+                        setDeltaMovement(0, -x, z);
+                        return true;
+                    }
+                    if(y > 0 && hitFace == Direction.DOWN) {
+                        setDeltaMovement(-y, 0, z);
+                        return true;
+                    }
+                }
+                return false;
+
             default:
                 return false;
         }
-        return true;
     }
 
     private static final String HORIZONTAL_STAIRS_ID = "sideways_stairs:horizontal_stairs";
@@ -225,32 +303,49 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
         }
 
         Vector3d vel = this.getDeltaMovement();
-        double dx = vel.x;
-        double dz = vel.z;
-
+        double x = vel.x, y = vel.y, z = vel.z;
 
         switch(facing) {
-            case "NE":
             case "SW":
-                if(facing.equals("NE") && hitFace != Direction.SOUTH && hitFace != Direction.EAST) {
-                    return false;
+                if(z < 0 && hitFace == Direction.SOUTH) {
+                    setDeltaMovement(z, y, 0);
+                    return true;
                 }
-                if(facing.equals("SW") && hitFace != Direction.NORTH && hitFace != Direction.WEST) {
-                    return false;
+                if(x > 0 && hitFace == Direction.WEST) {
+                    setDeltaMovement(0, y, x);
+                    return true;
                 }
-                this.setDeltaMovement(dz, vel.y, dx);
-                return true;
+                return false;
+            case "NE":
+                if(z > 0 && hitFace == Direction.NORTH) {
+                    setDeltaMovement(z, y, 0);
+                    return true;
+                }
+                if(x < 0 && hitFace == Direction.EAST) {
+                    setDeltaMovement(0, y, x);
+                    return true;
+                }
+                return false;
             case "SE":
+                if(z < 0 && hitFace == Direction.SOUTH) {
+                    setDeltaMovement(-z, y, 0);
+                    return true;
+                }
+                if(x < 0 && hitFace == Direction.EAST) {
+                    setDeltaMovement(0, y, -x);
+                    return true;
+                }
+                return false;
             case "NW":
-
-                if(facing.equals("SE") && hitFace != Direction.NORTH && hitFace != Direction.EAST) {
-                    return false;
+                if(z > 0 && hitFace == Direction.NORTH) {
+                    setDeltaMovement(-z, y, 0);
+                    return true;
                 }
-                if(facing.equals("NW") && hitFace != Direction.SOUTH && hitFace != Direction.WEST) {
-                    return false;
+                if(x > 0 && hitFace == Direction.WEST) {
+                    setDeltaMovement(0, y, -x);
+                    return true;
                 }
-                this.setDeltaMovement(-dz, vel.y, -dx);
-                return true;
+                return false;
             default:
                 return false;
         }
