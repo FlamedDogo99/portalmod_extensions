@@ -22,6 +22,10 @@ import net.portalmod_extensions.PortalModExtensions;
 import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEntity;
 import net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.StairsBlock;
+import net.minecraft.state.properties.BlockStateProperties;
+import net.minecraft.state.properties.Half;
+import net.minecraft.util.Direction;
 import net.portalmod_extensions.common.blocks.EnergyPelletReceiverBlock;
 
 import javax.annotation.Nonnull;
@@ -134,23 +138,29 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
         if(this.level.isClientSide) {
             return;
         }
-        // basic block hit reflections
-        Vector3d vel = this.getDeltaMovement();
-        switch(result.getDirection().getAxis()) {
-            case X:
-                this.setDeltaMovement(-vel.x, vel.y, vel.z);
-                break;
-            case Y:
-                this.setDeltaMovement(vel.x, -vel.y, vel.z);
-                break;
-            case Z:
-                this.setDeltaMovement(vel.x, vel.y, -vel.z);
-                break;
+
+        BlockPos hitPos = result.getBlockPos();
+        BlockState hitState = this.level.getBlockState(hitPos);
+        Direction hitFace = result.getDirection();
+
+        // try stair deflections before falling back to axis reflection
+        if(!tryVanillaStairDeflect(hitState, hitFace) && !tryHorizontalStairDeflect(hitState, hitFace)) {
+            // basic axis-aligned reflection
+            Vector3d vel = this.getDeltaMovement();
+            switch(hitFace.getAxis()) {
+                case X:
+                    this.setDeltaMovement(-vel.x, vel.y, vel.z);
+                    break;
+                case Y:
+                    this.setDeltaMovement(vel.x, -vel.y, vel.z);
+                    break;
+                case Z:
+                    this.setDeltaMovement(vel.x, vel.y, -vel.z);
+                    break;
+            }
         }
 
         // check for receiver collision, resolve for up left tile entity
-        BlockPos hitPos = result.getBlockPos();
-        BlockState hitState = this.level.getBlockState(hitPos);
         if(hitState.getBlock() instanceof EnergyPelletReceiverBlock) {
             EnergyPelletReceiverBlock receiverBlock = (EnergyPelletReceiverBlock) hitState.getBlock();
             BlockPos mainPos = receiverBlock.getMainPosition(hitState, hitPos);
@@ -162,6 +172,87 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
                     this.remove();
                 }
             }
+        }
+    }
+
+    private boolean tryVanillaStairDeflect(BlockState state, Direction hitFace) {
+        if(!(state.getBlock() instanceof StairsBlock)) {
+            return false;
+        }
+        Direction stairFacing = state.getValue(BlockStateProperties.HORIZONTAL_FACING);
+        Half half = state.getValue(BlockStateProperties.HALF);
+
+        if(hitFace != stairFacing.getOpposite()) {
+            return false;
+        }
+
+        Vector3d vel = this.getDeltaMovement();
+        double ySign = (half == Half.BOTTOM) ? 1.0 : -1.0;
+
+        switch(hitFace.getAxis()) {
+            case X:
+                this.setDeltaMovement(0, Math.abs(vel.x) * ySign, vel.z);
+                break;
+            case Z:
+                this.setDeltaMovement(vel.x, Math.abs(vel.z) * ySign, 0);
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+
+    private static final String HORIZONTAL_STAIRS_ID = "sideways_stairs:horizontal_stairs";
+
+    private boolean tryHorizontalStairDeflect(BlockState state, Direction hitFace) {
+        net.minecraft.util.ResourceLocation regName = state.getBlock().getRegistryName();
+        if(regName == null || !HORIZONTAL_STAIRS_ID.equals(regName.toString())) {
+            return false;
+        }
+
+        String facing;
+        try {
+            facing = state.getValues().entrySet().stream().filter(e -> e.getKey().getName().equals("facing")).map(e -> e.getValue().toString().toUpperCase()).findFirst().orElse(null);
+        } catch(Exception e) {
+            return false;
+        }
+        if(facing == null) {
+            return false;
+        }
+
+        if(hitFace.getAxis() == Direction.Axis.Y) {
+            return false;
+        }
+
+        Vector3d vel = this.getDeltaMovement();
+        double dx = vel.x;
+        double dz = vel.z;
+
+
+        switch(facing) {
+            case "NE":
+            case "SW":
+                if(facing.equals("NE") && hitFace != Direction.SOUTH && hitFace != Direction.EAST) {
+                    return false;
+                }
+                if(facing.equals("SW") && hitFace != Direction.NORTH && hitFace != Direction.WEST) {
+                    return false;
+                }
+                this.setDeltaMovement(dz, vel.y, dx);
+                return true;
+            case "SE":
+            case "NW":
+
+                if(facing.equals("SE") && hitFace != Direction.NORTH && hitFace != Direction.EAST) {
+                    return false;
+                }
+                if(facing.equals("NW") && hitFace != Direction.SOUTH && hitFace != Direction.WEST) {
+                    return false;
+                }
+                this.setDeltaMovement(-dz, vel.y, -dx);
+                return true;
+            default:
+                return false;
         }
     }
 
