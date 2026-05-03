@@ -25,6 +25,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.StairsBlock;
 import net.minecraft.state.properties.BlockStateProperties;
 import net.minecraft.state.properties.Half;
+import net.minecraft.state.properties.StairsShape;
 import net.minecraft.util.Direction;
 import net.portalmod_extensions.common.blocks.EnergyPelletReceiverBlock;
 
@@ -141,13 +142,15 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
 
         BlockPos hitPos = result.getBlockPos();
         BlockState hitState = this.level.getBlockState(hitPos);
-        Direction hitFace = result.getDirection();
 
-        // try stair deflections before falling back to axis reflection
-        if(!tryVanillaStairDeflect(hitState, hitFace) && !tryHorizontalStairDeflect(hitState, hitFace)) {
-            // basic axis-aligned reflection
+        // attempt stair slope reflection first, fall back to axis reflection
+        Vector3d slopeNormal = getStairSlopeNormal(hitState, result);
+        if(slopeNormal != null) {
+            reflectOffNormal(slopeNormal);
+            nudgePastPlane(result.getLocation(), slopeNormal);
+        } else {
             Vector3d vel = this.getDeltaMovement();
-            switch(hitFace.getAxis()) {
+            switch(result.getDirection().getAxis()) {
                 case X:
                     this.setDeltaMovement(-vel.x, vel.y, vel.z);
                     break;
@@ -174,181 +177,60 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
             }
         }
     }
-    // This is ugly and inelegant, but I'm tired of messing up rotation matrices
-    private boolean tryVanillaStairDeflect(BlockState state, Direction hitFace) {
+
+    @Nullable
+    private Vector3d getStairSlopeNormal(BlockState state, BlockRayTraceResult result) {
         if(!(state.getBlock() instanceof StairsBlock)) {
-            return false;
+            return null;
         }
+        StairsShape shape = state.getValue(BlockStateProperties.STAIRS_SHAPE);
+        // only dealing with straight stairs
+        if(shape != StairsShape.STRAIGHT) {
+            return null;
+        }
+
         Direction facing = state.getValue(BlockStateProperties.HORIZONTAL_FACING);
         Half half = state.getValue(BlockStateProperties.HALF);
-        boolean bottom = (half == Half.BOTTOM);
 
-        Vector3d vel = this.getDeltaMovement();
-        double x = vel.x, y = vel.y, z = vel.z;
-
+        // unnormalized slope normal
+        double normalizedX = 0, normalizedY = (half == Half.BOTTOM) ? 1.0 : -1.0, normalizedZ = 0;
         switch(facing) {
             case NORTH:
-                if(bottom) {
-                    if(z < 0 && hitFace == Direction.SOUTH) {
-                        setDeltaMovement(x, -z, 0);
-                        return true;
-                    }
-                    if(y < 0 && hitFace == Direction.UP) {
-                        setDeltaMovement(x, 0, -y);
-                        return true;
-                    }
-                } else {
-                    if(z < 0 && hitFace == Direction.SOUTH) {
-                        setDeltaMovement(x, z, 0);
-                        return true;
-                    }
-                    if(y > 0 && hitFace == Direction.DOWN) {
-                        setDeltaMovement(x, 0, y);
-                        return true;
-                    }
-                }
-                return false;
-
+                normalizedZ = 1.0;
+                break;
             case SOUTH:
-                if(bottom) {
-                    if(z > 0 && hitFace == Direction.NORTH) {
-                        setDeltaMovement(x, z, 0);
-                        return true;
-                    }
-                    if(y < 0 && hitFace == Direction.UP) {
-                        setDeltaMovement(x, 0, y);
-                        return true;
-                    }
-                } else {
-                    if(z > 0 && hitFace == Direction.NORTH) {
-                        setDeltaMovement(x, -z, 0);
-                        return true;
-                    }
-                    if(y > 0 && hitFace == Direction.DOWN) {
-                        setDeltaMovement(x, 0, -y);
-                        return true;
-                    }
-                }
-                return false;
-
+                normalizedZ = -1.0;
+                break;
             case WEST:
-                if(bottom) {
-                    if(x < 0 && hitFace == Direction.EAST) {
-                        setDeltaMovement(0, -x, z);
-                        return true;
-                    }
-                    if(y < 0 && hitFace == Direction.UP) {
-                        setDeltaMovement(-y, 0, z);
-                        return true;
-                    }
-                } else {
-                    if(x < 0 && hitFace == Direction.EAST) {
-                        setDeltaMovement(0, x, z);
-                        return true;
-                    }
-                    if(y > 0 && hitFace == Direction.DOWN) {
-                        setDeltaMovement(y, 0, z);
-                        return true;
-                    }
-                }
-                return false;
-
+                normalizedX = 1.0;
+                break;
             case EAST:
-                if(bottom) {
-                    if(x > 0 && hitFace == Direction.WEST) {
-                        setDeltaMovement(0, x, z);
-                        return true;
-                    }
-                    if(y < 0 && hitFace == Direction.UP) {
-                        setDeltaMovement(y, 0, z);
-                        return true;
-                    }
-                } else {
-                    if(x > 0 && hitFace == Direction.WEST) {
-                        setDeltaMovement(0, -x, z);
-                        return true;
-                    }
-                    if(y > 0 && hitFace == Direction.DOWN) {
-                        setDeltaMovement(-y, 0, z);
-                        return true;
-                    }
-                }
-                return false;
-
+                normalizedX = -1.0;
+                break;
             default:
-                return false;
+                return null;
         }
-    }
-
-    private static final String HORIZONTAL_STAIRS_ID = "sideways_stairs:horizontal_stairs";
-
-    private boolean tryHorizontalStairDeflect(BlockState state, Direction hitFace) {
-        net.minecraft.util.ResourceLocation regName = state.getBlock().getRegistryName();
-        if(regName == null || !HORIZONTAL_STAIRS_ID.equals(regName.toString())) {
-            return false;
-        }
-
-        String facing;
-        try {
-            facing = state.getValues().entrySet().stream().filter(e -> e.getKey().getName().equals("facing")).map(e -> e.getValue().toString().toUpperCase()).findFirst().orElse(null);
-        } catch(Exception e) {
-            return false;
-        }
-        if(facing == null) {
-            return false;
-        }
-
-        if(hitFace.getAxis() == Direction.Axis.Y) {
-            return false;
-        }
+        Vector3d normal = new Vector3d(normalizedX, normalizedY, normalizedZ).normalize();
 
         Vector3d vel = this.getDeltaMovement();
-        double x = vel.x, y = vel.y, z = vel.z;
-
-        switch(facing) {
-            case "SW":
-                if(z < 0 && hitFace == Direction.SOUTH) {
-                    setDeltaMovement(z, y, 0);
-                    return true;
-                }
-                if(x > 0 && hitFace == Direction.WEST) {
-                    setDeltaMovement(0, y, x);
-                    return true;
-                }
-                return false;
-            case "NE":
-                if(z > 0 && hitFace == Direction.NORTH) {
-                    setDeltaMovement(z, y, 0);
-                    return true;
-                }
-                if(x < 0 && hitFace == Direction.EAST) {
-                    setDeltaMovement(0, y, x);
-                    return true;
-                }
-                return false;
-            case "SE":
-                if(z < 0 && hitFace == Direction.SOUTH) {
-                    setDeltaMovement(-z, y, 0);
-                    return true;
-                }
-                if(x < 0 && hitFace == Direction.EAST) {
-                    setDeltaMovement(0, y, -x);
-                    return true;
-                }
-                return false;
-            case "NW":
-                if(z > 0 && hitFace == Direction.NORTH) {
-                    setDeltaMovement(-z, y, 0);
-                    return true;
-                }
-                if(x > 0 && hitFace == Direction.WEST) {
-                    setDeltaMovement(0, y, -x);
-                    return true;
-                }
-                return false;
-            default:
-                return false;
+        if(vel.dot(normal) >= 0) {
+            return null;
         }
+
+        return normal;
+    }
+
+    private void reflectOffNormal(Vector3d normal) {
+        Vector3d vel = this.getDeltaMovement();
+        double dot = vel.dot(normal);
+        this.setDeltaMovement(vel.subtract(normal.scale(2.0 * dot)));
+    }
+
+    // prevent re-collision the next tick
+    private void nudgePastPlane(Vector3d contact, Vector3d normal) {
+        final double EPSILON = 1e-3;
+        this.moveTo(contact.x + normal.x * EPSILON, contact.y + normal.y * EPSILON, contact.z + normal.z * EPSILON, this.yRot, this.xRot);
+        this.reapplyPosition();
     }
 
     @Override
