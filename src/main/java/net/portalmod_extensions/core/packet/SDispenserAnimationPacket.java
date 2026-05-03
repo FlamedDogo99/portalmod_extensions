@@ -12,7 +12,7 @@ import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEnt
 import java.util.function.Supplier;
 
 /**
- * Sent server→client whenever the dispenser shoots a pellet.
+ * Sent server to client whenever the dispenser shoots a pellet.
  * The client uses this to start the shoot animation on the matching tile entity.
  */
 public class SDispenserAnimationPacket {
@@ -32,18 +32,18 @@ public class SDispenserAnimationPacket {
     }
 
     public static boolean handle(SDispenserAnimationPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() ->
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> handleClient(packet))
-        );
+        ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> handleClient(packet)));
         ctx.get().setPacketHandled(true);
         return true;
     }
 
     private static void handleClient(SDispenserAnimationPacket packet) {
-        if (Minecraft.getInstance().level == null) return;
-        TileEntity te = Minecraft.getInstance().level.getBlockEntity(packet.pos);
-        if (te instanceof EnergyPelletDispenserTileEntity) {
-            ((EnergyPelletDispenserTileEntity) te).startShootAnimation();
+        if(Minecraft.getInstance().level == null) {
+            return;
+        }
+        TileEntity tileEntity = Minecraft.getInstance().level.getBlockEntity(packet.pos);
+        if(tileEntity instanceof EnergyPelletDispenserTileEntity) {
+            ((EnergyPelletDispenserTileEntity) tileEntity).startShootAnimation();
         }
     }
 }

@@ -91,7 +91,6 @@ public class EnergyPelletDispenserTileEntity extends TileEntity implements ITick
     }
 
     public void onPowerChanged(boolean nowPowered) {
-        net.portalmod_extensions.PortalModExtensions.LOGGER.info("onPowerChanged: " + nowPowered);
         boolean wasPoweredBefore = wasPowered;
         wasPowered = nowPowered;
         if(nowPowered && !wasPoweredBefore) {
@@ -102,7 +101,6 @@ public class EnergyPelletDispenserTileEntity extends TileEntity implements ITick
     }
 
     private void spawnPelletIfAbsent() {
-        net.portalmod_extensions.PortalModExtensions.LOGGER.info("spawnPelletIfAbsent: ");
         if(this.level == null || this.level.isClientSide) {
             return;
         }
@@ -153,7 +151,6 @@ public class EnergyPelletDispenserTileEntity extends TileEntity implements ITick
     }
 
     public void killPelletAndClearReceivers() {
-        net.portalmod_extensions.PortalModExtensions.LOGGER.info("killPelletAndClearReceivers: ");
         if(this.level == null || this.level.isClientSide) {
             return;
         }
