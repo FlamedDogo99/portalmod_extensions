@@ -226,6 +226,7 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
 
     @Nullable
     private Vector3d getHorizontalStairSlopeNormal(BlockState state, BlockRayTraceResult result) {
+        LOGGER.warn("getHorizontalStairSlopeNormal", state.getBlock(), result.getBlockPos());
         net.minecraft.util.ResourceLocation regName = state.getBlock().getRegistryName();
         if(regName == null || !HORIZONTAL_STAIRS_ID.equals(regName.toString())) {
             return null;
@@ -249,18 +250,18 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
         double normalizedX, normalizedZ;
         switch(facing) {
             case "SW":
+                normalizedX = 1;
+                normalizedZ = -1;
+                break;
+            case "SE":
+                normalizedX = 1;
+                normalizedZ = 1;
+                break;
+            case "NW":
                 normalizedX = -1;
                 normalizedZ = -1;
                 break;
             case "NE":
-                normalizedX = 1;
-                normalizedZ = 1;
-                break;
-            case "SE":
-                normalizedX = 1;
-                normalizedZ = -1;
-                break;
-            case "NW":
                 normalizedX = -1;
                 normalizedZ = 1;
                 break;
@@ -271,7 +272,7 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
 
         // only apply slope reflection when approaching from the sloped side
         Vector3d vel = this.getDeltaMovement();
-        if(vel.dot(normal) >= 0) {
+        if(vel.dot(normal) > 0) {
             return null;
         }
 
