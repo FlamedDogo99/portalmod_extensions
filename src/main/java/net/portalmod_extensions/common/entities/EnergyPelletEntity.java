@@ -145,6 +145,9 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
 
         // attempt stair slope reflection first, fall back to axis reflection
         Vector3d slopeNormal = getStairSlopeNormal(hitState, result);
+        if(slopeNormal == null) {
+            slopeNormal = getHorizontalStairSlopeNormal(hitState, result);
+        }
         if(slopeNormal != null) {
             reflectOffNormal(slopeNormal);
             nudgePastPlane(result.getLocation(), slopeNormal);
@@ -211,7 +214,62 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
                 return null;
         }
         Vector3d normal = new Vector3d(normalizedX, normalizedY, normalizedZ).normalize();
+        Vector3d vel = this.getDeltaMovement();
+        if(vel.dot(normal) >= 0) {
+            return null;
+        }
 
+        return normal;
+    }
+
+    private static final String HORIZONTAL_STAIRS_ID = "sideways_stairs:horizontal_stairs";
+
+    @Nullable
+    private Vector3d getHorizontalStairSlopeNormal(BlockState state, BlockRayTraceResult result) {
+        net.minecraft.util.ResourceLocation regName = state.getBlock().getRegistryName();
+        if(regName == null || !HORIZONTAL_STAIRS_ID.equals(regName.toString())) {
+            return null;
+        }
+
+        // horizontal stair slopes are entered through a vertical face, not top/bottom
+        if(result.getDirection().getAxis() == Direction.Axis.Y) {
+            return null;
+        }
+
+        String facing;
+        try {
+            facing = state.getValues().entrySet().stream().filter(e -> e.getKey().getName().equals("facing")).map(e -> e.getValue().toString().toUpperCase()).findFirst().orElse(null);
+        } catch(Exception e) {
+            return null;
+        }
+        if(facing == null) {
+            return null;
+        }
+
+        double normalizedX, normalizedZ;
+        switch(facing) {
+            case "SW":
+                normalizedX = -1;
+                normalizedZ = -1;
+                break;
+            case "NE":
+                normalizedX = 1;
+                normalizedZ = 1;
+                break;
+            case "SE":
+                normalizedX = 1;
+                normalizedZ = -1;
+                break;
+            case "NW":
+                normalizedX = -1;
+                normalizedZ = 1;
+                break;
+            default:
+                return null;
+        }
+        Vector3d normal = new Vector3d(normalizedX, 0, normalizedZ).normalize();
+
+        // only apply slope reflection when approaching from the sloped side
         Vector3d vel = this.getDeltaMovement();
         if(vel.dot(normal) >= 0) {
             return null;
