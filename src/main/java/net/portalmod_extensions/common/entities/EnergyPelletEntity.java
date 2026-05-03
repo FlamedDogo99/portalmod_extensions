@@ -22,6 +22,11 @@ import net.portalmod_extensions.PortalModExtensions;
 import net.portalmod_extensions.common.tileentities.EnergyPelletDispenserTileEntity;
 import net.portalmod_extensions.common.tileentities.EnergyPelletReceiverTileEntity;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.StairsBlock;
+import net.minecraft.state.properties.BlockStateProperties;
+import net.minecraft.state.properties.Half;
+import net.minecraft.state.properties.StairsShape;
+import net.minecraft.util.Direction;
 import net.portalmod_extensions.common.blocks.EnergyPelletReceiverBlock;
 
 import javax.annotation.Nonnull;
@@ -45,6 +50,9 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
     private static final String PORTALMOD_NAMESPACE = "portalmod";
     private static final DataParameter<Integer> DATA_AGE = EntityDataManager.defineId(EnergyPelletEntity.class, DataSerializers.INT);
     private boolean notifiedDispenser = false;
+
+    @Nullable
+    private BlockPos ignoredBouncePos = null;
 
     @Nullable
     private BlockPos dispenserPos = null;
@@ -134,23 +142,44 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
         if(this.level.isClientSide) {
             return;
         }
-        // basic block hit reflections
-        Vector3d vel = this.getDeltaMovement();
-        switch(result.getDirection().getAxis()) {
-            case X:
-                this.setDeltaMovement(-vel.x, vel.y, vel.z);
-                break;
-            case Y:
-                this.setDeltaMovement(vel.x, -vel.y, vel.z);
-                break;
-            case Z:
-                this.setDeltaMovement(vel.x, vel.y, -vel.z);
-                break;
+
+        BlockPos hitPos = result.getBlockPos();
+
+        if(!hitPos.equals(ignoredBouncePos)) {
+            ignoredBouncePos = null;
+        }
+        if(hitPos.equals(ignoredBouncePos)) {
+            return;
         }
 
-        // check for receiver collision, resolve for up left tile entity
-        BlockPos hitPos = result.getBlockPos();
         BlockState hitState = this.level.getBlockState(hitPos);
+
+        // attempt stair slope reflection first, fall back to axis reflection
+        Vector3d slopeNormal = getStairSlopeNormal(hitState, result);
+        if(slopeNormal == null) {
+            slopeNormal = getHorizontalStairSlopeNormal(hitState, result);
+        }
+        if(slopeNormal != null) {
+            reflectOffNormal(slopeNormal);
+            nudgePastPlane(result.getLocation(), slopeNormal);
+        } else {
+            Vector3d vel = this.getDeltaMovement();
+            switch(result.getDirection().getAxis()) {
+                case X:
+                    this.setDeltaMovement(-vel.x, vel.y, vel.z);
+                    break;
+                case Y:
+                    this.setDeltaMovement(vel.x, -vel.y, vel.z);
+                    break;
+                case Z:
+                    this.setDeltaMovement(vel.x, vel.y, -vel.z);
+                    break;
+            }
+        }
+
+        ignoredBouncePos = hitPos;
+
+        // check for receiver collision, resolve for up left tile entity
         if(hitState.getBlock() instanceof EnergyPelletReceiverBlock) {
             EnergyPelletReceiverBlock receiverBlock = (EnergyPelletReceiverBlock) hitState.getBlock();
             BlockPos mainPos = receiverBlock.getMainPosition(hitState, hitPos);
@@ -163,6 +192,118 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
                 }
             }
         }
+    }
+
+    @Nullable
+    private Vector3d getStairSlopeNormal(BlockState state, BlockRayTraceResult result) {
+        if(!(state.getBlock() instanceof StairsBlock)) {
+            return null;
+        }
+        StairsShape shape = state.getValue(BlockStateProperties.STAIRS_SHAPE);
+        // only dealing with straight stairs
+        if(shape != StairsShape.STRAIGHT) {
+            return null;
+        }
+
+        Direction facing = state.getValue(BlockStateProperties.HORIZONTAL_FACING);
+        Half half = state.getValue(BlockStateProperties.HALF);
+
+        // unnormalized slope normal
+        double normalizedX = 0, normalizedY = (half == Half.BOTTOM) ? 1.0 : -1.0, normalizedZ = 0;
+        switch(facing) {
+            case NORTH:
+                normalizedZ = 1.0;
+                break;
+            case SOUTH:
+                normalizedZ = -1.0;
+                break;
+            case WEST:
+                normalizedX = 1.0;
+                break;
+            case EAST:
+                normalizedX = -1.0;
+                break;
+            default:
+                return null;
+        }
+        Vector3d normal = new Vector3d(normalizedX, normalizedY, normalizedZ).normalize();
+        Vector3d vel = this.getDeltaMovement();
+        if(vel.dot(normal) >= 0) {
+            return null;
+        }
+
+        return normal;
+    }
+
+    private static final String HORIZONTAL_STAIRS_ID = "sideways_stairs:horizontal_stairs";
+
+    @Nullable
+    private Vector3d getHorizontalStairSlopeNormal(BlockState state, BlockRayTraceResult result) {
+        net.minecraft.util.ResourceLocation regName = state.getBlock().getRegistryName();
+        if(regName == null || !HORIZONTAL_STAIRS_ID.equals(regName.toString())) {
+            return null;
+        }
+
+        Direction hitFace = result.getDirection();
+        if(hitFace.getAxis() == Direction.Axis.Y) {
+            return null;
+        }
+
+        String facing;
+        try {
+            facing = state.getValues().entrySet().stream().filter(e -> e.getKey().getName().equals("facing")).map(e -> e.getValue().toString().toUpperCase()).findFirst().orElse(null);
+        } catch(Exception e) {
+            return null;
+        }
+        if(facing == null) {
+            return null;
+        }
+
+        boolean isSlopeFace;
+        double normalizedX, normalizedZ;
+        switch(facing) {
+            case "SW":
+                isSlopeFace = (hitFace == Direction.SOUTH || hitFace == Direction.WEST);
+                normalizedX = 1;
+                normalizedZ = -1;
+                break;
+            case "SE":
+                isSlopeFace = (hitFace == Direction.SOUTH || hitFace == Direction.EAST);
+                normalizedX = 1;
+                normalizedZ = 1;
+                break;
+            case "NW":
+                isSlopeFace = (hitFace == Direction.NORTH || hitFace == Direction.WEST);
+                normalizedX = -1;
+                normalizedZ = -1;
+                break;
+            case "NE":
+                isSlopeFace = (hitFace == Direction.NORTH || hitFace == Direction.EAST);
+                normalizedX = -1;
+                normalizedZ = 1;
+                break;
+            default:
+                return null;
+        }
+
+        if(!isSlopeFace) {
+            return null;
+        }
+
+        return new Vector3d(normalizedX, 0, normalizedZ).normalize();
+    }
+
+    private void reflectOffNormal(Vector3d normal) {
+        Vector3d vel = this.getDeltaMovement();
+        double dot = vel.dot(normal);
+        this.setDeltaMovement(vel.subtract(normal.scale(2.0 * dot)));
+    }
+
+    // prevent re-collision the next tick
+    private void nudgePastPlane(Vector3d contact, Vector3d normal) {
+        final double EPSILON = 1e-2;
+        this.moveTo(contact.x + normal.x * EPSILON, contact.y + normal.y * EPSILON, contact.z + normal.z * EPSILON, this.yRot, this.xRot);
+        this.reapplyPosition();
     }
 
     @Override
@@ -190,6 +331,7 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
     private void handlePortalModEntityCollision(EntityRayTraceResult result, Entity target) {
         // bounce off of portalmod cubes
         if(target instanceof net.portalmod.common.sorted.cube.Cube) {
+            ignoredBouncePos = null;
             reflectOffRotatedCube(result, (net.portalmod.common.sorted.cube.Cube) target);
             return;
         }
@@ -300,9 +442,9 @@ public class EnergyPelletEntity extends FireballEntity implements net.portalmod.
             }
         }
 
-        TileEntity te = dispenserWorld.getBlockEntity(dispenserPos);
-        if(te instanceof EnergyPelletDispenserTileEntity) {
-            ((EnergyPelletDispenserTileEntity) te).onPelletExpired();
+        TileEntity tileEntity = dispenserWorld.getBlockEntity(dispenserPos);
+        if(tileEntity instanceof EnergyPelletDispenserTileEntity) {
+            ((EnergyPelletDispenserTileEntity) tileEntity).onPelletExpired();
         }
     }
 
